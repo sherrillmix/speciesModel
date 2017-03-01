@@ -34,16 +34,19 @@ model {
   x ~ normal(mus[ids],sigma);
 }
 '
-mus<-rnorm(10,3,1)
-weights<-rgamma(10,1,.1)
+nSpecies<-20
+mus<-rnorm(nSpecies,3,1)
+weights<-rgamma(nSpecies,1,.1)
 beta<-.1
-x<-mapply(function(mu,weight)rnorm(sample(10,1),mu+beta*weight,1),mus,weights,SIMPLIFY=FALSE)
-xWeights<-rep(weights,sapply(x,length))
-ids<-rep(1:length(x),sapply(x,length))
-idClasses<-c(1:5,sample(1:5,length(x)-5,TRUE)) #make sure at least 1 each
+ns<-replicate(nSpecies,sample(10,1))
+ids<-rep(1:length(ns),ns)
+idClasses<-c(1:5,sample(1:5,length(ns)-5,TRUE)) #make sure at least 1 each
 classes<-idClasses[ids]
-vpPlot(ids,unlist(x))
-plot(xWeights,unlist(x))
+betas<-rnorm(length(unique(classes)),beta,.05)
+x<-mapply(function(mu,weight,beta,n)rnorm(n,mu+beta*weight,1),mus,weights,betas,ns,SIMPLIFY=FALSE)
+xWeights<-rep(weights,sapply(x,length))
+vpPlot(ids,unlist(x),offsetXArgs=list(width=.3),pch=21,bg=rainbow(max(ids))[ids])
+plot(xWeights,unlist(x),pch=21,bg=rainbow(max(ids))[ids])
 fit<-stan(
   model_code=stanCode,
   data=list(
@@ -61,9 +64,8 @@ fit<-stan(
 print(fit)
 
 plot(fit)
-traceplot(fit)
-traceplot(fit)
+print(traceplot(fit))
 sims<-extract(fit)
-hist(sims[['mu']])
+hist(sims[['metaBeta']])
 
 
