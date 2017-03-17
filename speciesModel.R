@@ -14,7 +14,7 @@ data{
 parameters {
   real metaMu;
   real<lower=0> metaSigma;
-  real<lower=0> sigma;
+  vector<lower=0>[nIds] sigmas;
   vector[nIds] rawMus;
   vector[nClasses] rawBetas;
   real metaBeta;
@@ -27,11 +27,12 @@ transformed parameters {
   mus = metaMu + betas .* weights + rawMus*metaSigma;
 }
 model {
+  sigmas ~ gamma(1,1);
   rawBetas ~ normal(0,1);
   metaBetaSd ~ gamma(1,1);
   metaSigma ~ gamma(1,1);
   rawMus ~ normal(0,1);
-  x ~ normal(mus[ids],sigma);
+  x ~ normal(mus[ids],sigmas[ids]);
 }
 '
 nSpecies<-20
