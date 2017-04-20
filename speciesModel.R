@@ -51,20 +51,22 @@ model {
 
 
 dat<-read.csv('tableScott.discovery.csv',row.names=1,stringsAsFactors=FALSE)
+colnames(dat)[colnames(dat)=='host_species_common_name']<-'common'
+dat$study<-'bushman'
 #CAREFUL excluding single sample classes for now
 #dat<-dat[ave(dat$class,dat$class,FUN=length)>1,]
-speciesIds<-1:length(unique(dat$host_species_common_name))
-names(speciesIds)<-unique(dat$host_species_common_name)
-dat$speciesId<-speciesIds[dat$host_species_common_name]
+speciesIds<-1:length(unique(dat$common))
+names(speciesIds)<-unique(dat$common)
+dat$speciesId<-speciesIds[dat$common]
 classIds<-1:length(unique(dat$class))
 names(classIds)<-unique(dat$class)
 dat$classId<-classIds[dat$class]
-speciesIdClasses<-sapply(names(speciesIds),function(xx)dat[dat$host_species_common_name==xx,][1,'class'])
+speciesIdClasses<-sapply(names(speciesIds),function(xx)dat[dat$common==xx,][1,'class'])
 
 
 plot(dat$log.weight,dat$log.otu,pch=21,bg=rainbow(max(dat$speciesId))[dat$speciesId],col=rainbow(max(dat$classId))[dat$classId],lwd=2)
-meanWeight<-tapply(dat$log.weight,dat$host_species_common_name,mean)
-meanOtu<-tapply(dat$log.otu,dat$host_species_common_name,mean)
+meanWeight<-tapply(dat$log.weight,dat$common,mean)
+meanOtu<-tapply(dat$log.otu,dat$common,mean)
 plot(meanWeight, meanOtu)
 summary(lm(meanOtu~meanWeight))
 
@@ -108,25 +110,32 @@ for(ii in 1:max(dat$classId)){
 dev.off()
 
 dat2<-read.csv('tableScott.validation.csv',row.names=1,stringsAsFactors=FALSE)
-dat2<-dat2[!is.na(dat2$log.otus),]
-speciesIds2<-1:length(unique(dat2$common))
-names(speciesIds2)<-unique(dat2$common)
-dat2$speciesId<-speciesIds2[dat2$common]
-classIds2<-1:length(unique(dat2$study))
-names(classIds2)<-unique(dat2$study)
-dat2$classId<-classIds[dat2$study]
-speciesIdClasses2<-sapply(names(speciesIds2),function(xx)dat2[dat2$common==xx,][1,'class'])
+#muegge<-dat2[dat2$study=='muegge',]
+#pdf('test.pdf');
+#plot(muegge$log.weight,muegge$log.otus)
+#text(muegge$log.weight,muegge$log.otus,muegge$common)
+#dev.off()
+#head(muegge)
+#dat2<-dat2[!is.na(dat2$log.otus),]
+dat2$studySpecies<-sprintf('%s-%s',dat2$study,dat2$common)
+speciesIds2<-1:length(unique(dat2$studySpecies))
+names(speciesIds2)<-unique(dat2$studySpecies)
+dat2$speciesId<-speciesIds2[dat2$studySpecies]
+studyIds<-1:length(unique(dat2$study))
+names(studyIds)<-unique(dat2$study)
+dat2$studyId<-studyIds[dat2$study]
+speciesIdClasses2<-sapply(names(speciesIds2),function(xx)dat2[dat2$studySpecies==xx,][1,'study'])
 
 fit2<-stan(
   model_code=stanCode,
   data=list(
-    otus=dat$log.otus,
-    n=nrow(dat),
-    ids=dat$speciesId,
-    nIds=max(dat$speciesId),
-    weights=tapply(dat$log.weight,dat$speciesId,mean),
-    classes=tapply(dat$classId,dat$speciesId,'[[',1),
-    nClasses=max(dat$classId)
+    otus=dat2$log.otus,
+    n=nrow(dat2),
+    ids=dat2$speciesId,
+    nIds=max(dat2$speciesId),
+    weights=tapply(dat2$log.weight,dat2$speciesId,mean),
+    classes=tapply(dat2$studyId,dat2$speciesId,'[[',1),
+    nClasses=max(dat2$studyId)
   ),
   control=list(adapt_delta=.99),
   chains=32,iter=100000,thin=100
@@ -139,17 +148,44 @@ speciesCols<-rainbow(max(dat2$speciesId))
 xlim<-range(dat2$log.weight)
 ylim<-range(dat2$log.otus)
 pdf('data2.pdf',width=12,height=12)
-plot(dat2$log.weight,dat2$log.otus,pch=21,bg=speciesCols[dat2$speciesId],col=rainbow(max(dat2$classId))[dat2$classId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim)
+plot(dat2$log.weight,dat2$log.otus,pch=21,bg=speciesCols[dat2$speciesId],col=rainbow(max(dat2$studyId))[dat2$studyId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim)
 segments(weights-.2,speciesMeans,weights+.2,speciesMeans,col=speciesCols,lwd=2)
-for(ii in 1:max(dat2$classId)){
-  withAs(dat=dat2[dat2$classId==ii,],plot(dat$log.weight,dat$log.otus,pch=21,bg=speciesCols[dat$speciesId],col=NA,lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',main=names(classIds)[ii],xlim=xlim,ylim=ylim,cex=2))
-  classSelect<-speciesIdClasses==names(classIds)[ii]
+for(ii in 1:max(dat2$studyId)){
+  withAs(dat=dat2[dat2$studyId==ii,],plot(dat$log.weight,dat$log.otus,pch=21,bg=speciesCols[dat$speciesId],col=NA,lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',main=names(studyIds)[ii],xlim=xlim,ylim=ylim,cex=2))
+  classSelect<-speciesIdClasses2==names(studyIds)[ii]
   segments(weights[classSelect]-.2,speciesMeans[classSelect],weights[classSelect]+.2,speciesMeans[classSelect],col=speciesCols[classSelect],lwd=2)
   thisIntercepts<-sims2[['intercepts']][,ii]
   thisBetas<-sims2[['betas']][,ii]
   abline(mean(thisIntercepts),mean(thisBetas),lty=2)
 }
 dev.off()
+
+commonCols<-c('common','class','log.otus','log.weight','study')
+dat3<-rbind(dat[,commonCols],dat3[,commonCols])
+dat3$studySpecies<-sprintf('%s-%s',dat3$study,dat3$common)
+speciesIds3<-1:length(unique(dat3$studySpecies))
+names(speciesIds3)<-unique(dat3$common)
+dat3$speciesId<-speciesIds3[dat3$common]
+dat3$studyClass<-sprintf('%s-%s',dat3$study,dat3$class)
+studyClassIds<-1:length(unique(dat3$studyClass))
+names(studyClassIds)<-unique(dat3$studyClass)
+dat3$studyClassId<-studyClassIds[dat3$studyClass]
+speciesIdClasses3<-sapply(names(speciesIds3),function(xx)dat3[dat3$common==xx,][1,'study'])
+
+fit3<-stan(
+  model_code=stanCode,
+  data=list(
+    otus=dat3$log.otus,
+    n=nrow(dat3),
+    ids=dat3$speciesId,
+    nIds=max(dat3$speciesId),
+    weights=tapply(dat3$log.weight,dat3$speciesId,mean),
+    classes=tapply(dat3$studyClassId,dat3$speciesId,'[[',1),
+    nClasses=max(dat3$studyId)
+  ),
+  control=list(adapt_delta=.99),
+  chains=32,iter=100000,thin=100
+)
 
 if(FALSE){
   nSpecies<-20
