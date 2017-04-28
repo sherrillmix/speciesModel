@@ -9,44 +9,44 @@ rstan_options(auto_write = TRUE)
 
 
 stanCode<-'
-data{
-  int<lower=0> n;
-  real otus[n]; //log
-  int<lower=1> ids[n];
-  int<lower=0> nIds;
-  vector[nIds] weights; //log
-  int<lower=1> classes[nIds];
-  int<lower=0> nClasses;
-}
-parameters {
-  vector[nClasses] intercepts;
-  real<lower=0> metaSigma;
-  //vector<lower=0>[nClasses] sigmas;
-  real<lower=0> sigma;
-  vector[nIds] rawMus;
-  vector[nClasses] rawBetas;
-  real metaBeta;
-  real<lower=0> metaBetaSd;
-  //real<lower=0> speciesVar;
-}
-transformed parameters {
-  vector[nIds] mus;
-  vector[nClasses] betas;
-  betas=metaBeta+metaBetaSd*rawBetas;
-  mus = intercepts[classes] + betas[classes] .* weights + rawMus*metaSigma;
-}
-model {
-  //speciesVar ~ gamma(1,3);
-  //sigmas ~ gamma(1,speciesVar);
-  //sigmas ~ gamma(1,3);
-  sigma ~ gamma(1,.1);
-  rawBetas ~ normal(0,1);
-  metaBetaSd ~ gamma(1,.1);
-  metaSigma ~ gamma(1,3);
-  rawMus ~ normal(0,1);
-  //otus ~ normal(mus[ids],sigmas[classes[ids]]);
-  otus ~ normal(mus[ids],sigma);
-}
+  data{
+    int<lower=0> n;
+    real otus[n]; //log
+    int<lower=1> ids[n];
+    int<lower=0> nIds;
+    vector[nIds] weights; //log
+    int<lower=1> classes[nIds];
+    int<lower=0> nClasses;
+  }
+  parameters {
+    vector[nClasses] intercepts;
+    real<lower=0> metaSigma;
+    //vector<lower=0>[nClasses] sigmas;
+    real<lower=0> sigma;
+    vector[nIds] rawMus;
+    vector[nClasses] rawBetas;
+    real metaBeta;
+    real<lower=0> metaBetaSd;
+    //real<lower=0> speciesVar;
+  }
+  transformed parameters {
+    vector[nIds] mus;
+    vector[nClasses] betas;
+    betas=metaBeta+metaBetaSd*rawBetas;
+    mus = intercepts[classes] + betas[classes] .* weights + rawMus*metaSigma;
+  }
+  model {
+    //speciesVar ~ gamma(1,3);
+    //sigmas ~ gamma(1,speciesVar);
+    //sigmas ~ gamma(1,3);
+    sigma ~ gamma(1,.1);
+    rawBetas ~ normal(0,1);
+    metaBetaSd ~ gamma(1,.1);
+    metaSigma ~ gamma(1,3);
+    rawMus ~ normal(0,1);
+    //otus ~ normal(mus[ids],sigmas[classes[ids]]);
+    otus ~ normal(mus[ids],sigma);
+  }
 '
 
 
@@ -64,6 +64,7 @@ classIds<-1:length(unique(dat$class))
 names(classIds)<-unique(dat$class)
 dat$classId<-classIds[dat$class]
 speciesIdClasses<-sapply(names(speciesIds),function(xx)dat[dat$common==xx,][1,'class'])
+dat$taxa<-tolower(apply(dat[,c('phylum','class','order','family','genus','species')],1,paste,collapse=' '))
 
 
 plot(dat$log.weight,dat$log.otu,pch=21,bg=rainbow(max(dat$speciesId))[dat$speciesId],col=rainbow(max(dat$classId))[dat$classId],lwd=2)
@@ -128,6 +129,7 @@ names(studyIds)<-unique(dat2$study)
 dat2$classId<-studyIds[dat2$study]
 dat2$group<-dat2$study
 speciesIdClasses2<-sapply(names(speciesIds2),function(xx)dat2[dat2$studySpecies==xx,][1,'study'])
+dat2$taxa<-tolower(apply(dat2[,c('phylum','class','order','family','genus','species')],1,paste,collapse=' '))
 
 fit2<-stan(
   model_code=stanCode,
@@ -168,17 +170,73 @@ pdf('data2.pdf',width=12,height=12)
   plotFit(fit2,dat2)
 dev.off()
 
-commonCols<-c('common','class','log.otus','log.weight','study')
-dat3<-rbind(dat[,commonCols],dat3[,commonCols])
+
+
+stanCode<-' data{
+  int<lower=0> n;
+  real otus[n]; //log
+  int<lower=1> ids[n];
+  int<lower=0> nIds;
+  vector[nIds] weights; //log
+  int<lower=1> classes[nIds];
+  int<lower=0> nClasses;
+  int<lower=1> studies[n];
+  int<lower=0> nStudies;
+}
+parameters {
+  vector[nClasses] intercepts;
+  real<lower=0> metaSigma;
+  //vector<lower=0>[nClasses] sigmas;
+  real<lower=0> sigma;
+  vector[nIds] rawMus;
+  vector[nClasses] rawBetas;
+  real metaBeta;
+  real<lower=0> metaBetaSd;
+  vector[nStudies] rawStudyBetas;
+  real<lower=0> metaStudyBetaSd;
+  //real<lower=0> speciesVar;
+}
+transformed parameters {
+  vector[n] mus;
+  vector[nClasses] betas;
+  vector[nStudies] studyBetas;
+  betas=metaBeta+metaBetaSd*rawBetas;
+  studyBetas=metaStudyBetaSd*rawStudyBetas;
+  //mus=intercepts[classes[ids]] + betas[classes[ids]] .* weights + rawMus[ids]*metaSigma;
+  mus = intercepts[classes[ids]] + studyBetas[studies]+betas[classes[ids]] .* weights[ids] + rawMus[ids]*metaSigma;
+}
+model {
+  //speciesVar ~ gamma(1,3);
+  //sigmas ~ gamma(1,speciesVar);
+  //sigmas ~ gamma(1,3);
+  metaStudyBetaSd ~ gamma(1,.1);
+  rawStudyBetas ~ normal(0,1);
+  sigma ~ gamma(1,.1);
+  rawBetas ~ normal(0,1);
+  metaBetaSd ~ gamma(1,.1);
+  metaSigma ~ gamma(1,3);
+  rawMus ~ normal(0,1);
+  //otus ~ normal(mus[ids],sigmas[classes[ids]]);
+  otus ~ normal(mus,sigma);
+}
+'
+commonCols<-c('common','class','log.otus','log.weight','study','taxa')
+dat3<-rbind(dat[,commonCols],dat2[,commonCols])
 dat3$studySpecies<-sprintf('%s-%s',dat3$study,dat3$common)
-speciesIds3<-1:length(unique(dat3$studySpecies))
-names(speciesIds3)<-unique(dat3$studySpecies)
-dat3$speciesId<-speciesIds3[dat3$studySpecies]
+speciesIds3<-1:length(unique(dat3$taxa))
+names(speciesIds3)<-unique(dat3$taxa)
+dat3$speciesId<-speciesIds3[dat3$taxa]
 dat3$studyClass<-sprintf('%s-%s',dat3$study,dat3$class)
 studyClassIds<-1:length(unique(dat3$studyClass))
 names(studyClassIds)<-unique(dat3$studyClass)
-dat3$classId<-studyClassIds[dat3$studyClass]
+#dat3$classId<-studyClassIds[dat3$studyClass]
 dat3$group<-dat3$studyClass
+classIds<-1:length(unique(dat3$class))
+names(classIds)<-unique(dat3$class)
+dat3$classId<-classIds[dat3$class]
+studyIds<-1:length(unique(dat3$study))
+names(studyIds)<-unique(dat3$study)
+dat3$studyId<-studyIds[dat3$study]
 speciesIdClasses3<-sapply(names(speciesIds3),function(xx)dat3[dat3$studySpecies==xx,][1,'study'])
 
 fit3<-stan(
@@ -190,7 +248,9 @@ fit3<-stan(
     nIds=max(dat3$speciesId),
     weights=tapply(dat3$log.weight,dat3$speciesId,mean),
     classes=tapply(dat3$classId,dat3$speciesId,'[[',1),
-    nClasses=max(dat3$classId)
+    nClasses=max(dat3$classId),
+    studies=dat3$studyId,
+    nStudies=max(dat3$studyId)
   ),
   control=list(adapt_delta=.99),
   chains=32,iter=10000,thin=10
