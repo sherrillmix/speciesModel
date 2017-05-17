@@ -1,6 +1,7 @@
 library(rstan)
 library(vipor)
 library(dnar)
+library(vioplot)
 
 #use multiple cores (careful with big models on small computers)
 options(mc.cores = parallel::detectCores())
@@ -185,11 +186,12 @@ stanCode<-' data{
 }
 parameters {
   vector[nClasses] intercepts;
-  real<lower=0> metaSigma;
-  //vector<lower=0>[nClasses] sigmas;
-  real<lower=0> sigma;
+  //real<lower=0> metaSigma;
+  vector<lower=0>[nClasses] classSigmas;
+  vector<lower=0>[nStudies] sigmas;
+  //real<lower=0> sigma;
   vector[nIds] rawMus;
-  vector[nClasses] rawBetas;
+ // vector[nClasses] rawBetas;
   real metaBeta;
   real<lower=0> metaBetaSd;
   vector[nStudies] rawStudyBetas;
@@ -200,24 +202,27 @@ transformed parameters {
   vector[n] mus;
   vector[nClasses] betas;
   vector[nStudies] studyBetas;
+  vector[nIds] speciesMus;
   betas=metaBeta+metaBetaSd*rawBetas;
   studyBetas=metaStudyBetaSd*rawStudyBetas;
   //mus=intercepts[classes[ids]] + betas[classes[ids]] .* weights + rawMus[ids]*metaSigma;
-  mus = intercepts[classes[ids]] + studyBetas[studies]+betas[classes[ids]] .* weights[ids] + rawMus[ids]*metaSigma;
+  speciesMus=rawMus .* classSigmas[classes];
+  mus = intercepts[classes[ids]] + studyBetas[studies]+betas[classes[ids]] .* weights[ids] + speciesMus[ids];
 }
 model {
   //speciesVar ~ gamma(1,3);
   //sigmas ~ gamma(1,speciesVar);
-  //sigmas ~ gamma(1,3);
+  classSigmas ~ gamma(1,.1);
+  sigmas ~ gamma(1,.1);
   metaStudyBetaSd ~ gamma(1,.1);
   rawStudyBetas ~ normal(0,1);
-  sigma ~ gamma(1,.1);
+  //sigma ~ gamma(1,.1);
   rawBetas ~ normal(0,1);
   metaBetaSd ~ gamma(1,.1);
-  metaSigma ~ gamma(1,3);
+  //metaSigma ~ gamma(1,3);
   rawMus ~ normal(0,1);
   //otus ~ normal(mus[ids],sigmas[classes[ids]]);
-  otus ~ normal(mus,sigma);
+  otus ~ normal(mus,sigmas[studies]);
 }
 '
 commonCols<-c('common','class','log.otus','log.weight','study','taxa')
@@ -230,7 +235,7 @@ dat3$studyClass<-sprintf('%s-%s',dat3$study,dat3$class)
 studyClassIds<-1:length(unique(dat3$studyClass))
 names(studyClassIds)<-unique(dat3$studyClass)
 #dat3$classId<-studyClassIds[dat3$studyClass]
-dat3$group<-dat3$studyClass
+dat3$group<-dat3$class
 classIds<-1:length(unique(dat3$class))
 names(classIds)<-unique(dat3$class)
 dat3$classId<-classIds[dat3$class]
@@ -253,13 +258,51 @@ fit3<-stan(
     nStudies=max(dat3$studyId)
   ),
   control=list(adapt_delta=.99),
-  chains=32,iter=10000,thin=10
+  chains=32,iter=5000,thin=5
 )
 
 pdf('trace3.pdf');print(traceplot(fit3,par=c('metaBeta','betas','metaSigma','sigma')));plot(fit3,par=c('metaBeta','betas'));dev.off()
 
+plotFit2<-function(fit,dat){
+  sims<-extract(fit)
+  #speciesMeans<-apply(sims[['speciesMus']],2,mean)
+  studyMeans<-apply(sims[['studyBetas']],2,mean)
+  weights<-tapply(dat$log.weight,dat$speciesId,mean)
+  speciesCols<-rainbow(max(dat$speciesId),alpha=.7)
+  studyCols<-rainbow(max(dat$studyId),alpha=.7)
+  xlim<-range(dat$log.weight)
+  ylim<-range(dat$log.otus)
+  dat$adjusted<-dat$log.otus-studyMeans[dat$studyId]
+  #plotting
+  plot(dat$log.weight,dat$log.otus,pch=21,bg=speciesCols[dat$speciesId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim)
+  plot(dat$log.weight,dat$adjusted,pch=21,bg=studyCols[dat$studyId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim,main='Adjusted')
+  #plot(weights,speciesMeans,col=speciesCols,ylab='Species mean OTUs',xlab='Weight')
+  for(ii in 1:max(dat$classId)){
+    withAs(dat=dat[dat$classId==ii,],plot(dat$log.weight,dat$log.otus,pch=21,bg=speciesCols[dat$speciesId],col=NA,lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',main=dat[1,'group'],xlim=xlim,ylim=ylim,cex=2))
+    classSelect<-sapply(1:max(dat$speciesId),function(x)dat[dat$speciesId==x,'classId'][1])==ii
+    #segments(weights[classSelect]-.2,speciesMeans[classSelect],weights[classSelect]+.2,speciesMeans[classSelect],col=speciesCols[classSelect],lwd=2)
+    thisIntercepts<-sims[['intercepts']][,ii]
+    thisBetas<-sims[['betas']][,ii]
+    abline(mean(thisIntercepts),mean(thisBetas),lty=2)
+    withAs(dat=dat[dat$classId==ii,],plot(dat$log.weight,dat$adjusted,pch=21,bg=studyCols[dat$studyId],col=NA,lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',main=sprintf('Adjusted %s',dat[1,'group']),xlim=xlim,ylim=ylim,cex=2))
+  }
+  betas<-sims[['studyBetas']]
+  betas<-betas[sample(nrow(betas),1e3),]
+  colnames(betas)<-sapply(1:max(dat3$studyId),function(xx)dat3[dat3$studyId==xx,'study'][1])
+  vpPlot(rep(colnames(betas),each=nrow(betas)),unlist(betas),las=2,ylab='Study offset')
+  sigmas<-sims[['sigmas']]
+  sigmas<-sigmas[sample(nrow(betas),1e3),]
+  colnames(sigmas)<-sapply(1:max(dat3$studyId),function(xx)dat3[dat3$studyId==xx,'study'][1])
+  vpPlot(rep(colnames(sigmas),each=nrow(sigmas)),unlist(sigmas),las=2,ylab='Standard deviation')
+  betas<-sims[['betas']]
+  colnames(betas)<-sapply(1:max(dat3$classId),function(xx)dat3[dat3$classId==xx,'class'][1])
+  betas<-cbind('meta'=sims[['metaBeta']],betas)
+  betas<-betas[sample(nrow(betas),1e3),]
+  vpPlot(factor(rep(colnames(betas),each=nrow(betas)),levels=colnames(betas)),unlist(betas),las=2,ylab='Slope')
+  abline(h=0,lty=2,col='red')
+}
 pdf('data3.pdf',width=12,height=12)
-  plotFit(fit3,dat3)
+  plotFit2(fit3,dat3)
 dev.off()
 
 
