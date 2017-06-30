@@ -173,7 +173,8 @@ dev.off()
 
 
 
-stanCode<-' data{
+stanCode<-'
+data{
   int<lower=0> n;
   real otus[n]; //log
   int<lower=1> ids[n];
@@ -191,23 +192,24 @@ parameters {
   vector<lower=0>[nStudies] sigmas;
   //real<lower=0> sigma;
   vector[nIds] rawMus;
- // vector[nClasses] rawBetas;
+  //vector[nClasses] rawBetas;
   real metaBeta;
-  real<lower=0> metaBetaSd;
+  //real<lower=0> metaBetaSd;
   vector[nStudies] rawStudyBetas;
   real<lower=0> metaStudyBetaSd;
   //real<lower=0> speciesVar;
 }
 transformed parameters {
   vector[n] mus;
-  vector[nClasses] betas;
+  //vector[nClasses] betas;
   vector[nStudies] studyBetas;
   vector[nIds] speciesMus;
-  betas=metaBeta+metaBetaSd*rawBetas;
+  //betas=metaBeta+metaBetaSd*rawBetas;
   studyBetas=metaStudyBetaSd*rawStudyBetas;
   //mus=intercepts[classes[ids]] + betas[classes[ids]] .* weights + rawMus[ids]*metaSigma;
   speciesMus=rawMus .* classSigmas[classes];
-  mus = intercepts[classes[ids]] + studyBetas[studies]+betas[classes[ids]] .* weights[ids] + speciesMus[ids];
+  //mus = intercepts[classes[ids]] + studyBetas[studies]+betas[classes[ids]] .* weights[ids] + speciesMus[ids];
+  mus = intercepts[classes[ids]] + studyBetas[studies]+metaBeta * weights[ids] + speciesMus[ids];
 }
 model {
   //speciesVar ~ gamma(1,3);
@@ -217,14 +219,15 @@ model {
   metaStudyBetaSd ~ gamma(1,.1);
   rawStudyBetas ~ normal(0,1);
   //sigma ~ gamma(1,.1);
-  rawBetas ~ normal(0,1);
-  metaBetaSd ~ gamma(1,.1);
+  //rawBetas ~ normal(0,1);
+  //metaBetaSd ~ gamma(1,.1);
   //metaSigma ~ gamma(1,3);
   rawMus ~ normal(0,1);
   //otus ~ normal(mus[ids],sigmas[classes[ids]]);
   otus ~ normal(mus,sigmas[studies]);
 }
 '
+
 commonCols<-c('common','class','log.otus','log.weight','study','taxa')
 dat3<-rbind(dat[,commonCols],dat2[,commonCols])
 dat3$studySpecies<-sprintf('%s-%s',dat3$study,dat3$common)
@@ -305,6 +308,40 @@ pdf('data3.pdf',width=12,height=12)
   plotFit2(fit3,dat3)
 dev.off()
 
+if(!file.exists('work/rareN.csv'))source('readData.R')
+rare<-read.csv('work/rareN.csv',row.names=1)
+rare2<-read.csv('work/rareN2.csv',row.names=1)
+info<-read.csv('data/islandGut discovery metadata - map.tsv.csv',row.names=1,stringsAsFactors=FALSE)
+info2<-read.csv('data/islandGut validation metadata - map.tsv.csv',row.names=1,stringsAsFactors=FALSE)
+info$otu<-rare[rownames(info),'X2']
+info2$otu<-rare2[rownames(info2),'X2']
+info$study<-'bushman'
+info$weight<-info$Weight_to_use
+info$nRead<-info$filteredReadCount
+info2$nRead<-info2$readCount
+sharedCols<-intersect(colnames(info),colnames(info2))
+combo<-rbind(info[,sharedCols],info2[info2$study!='bushman',sharedCols])
+combo<-combo[combo$nRead>1000&!is.na(combo$weight),]
+combo$speciesId<-as.numeric(as.factor(paste(combo$genus,combo$species)))
+combo$classId<-as.numeric(as.factor(combo$class))
+combo$studyId<-as.numeric(as.factor(combo$study))
+
+fit4<-stan(
+  model_code=stanCode,
+  data=list(
+    otus=log10(combo$otu),
+    n=nrow(combo),
+    ids=combo$speciesId,
+    nIds=max(combo$speciesId),
+    weights=tapply(log10(combo$weight),combo$speciesId,mean),
+    classes=tapply(combo$classId,combo$speciesId,'[[',1),
+    nClasses=max(combo$classId),
+    studies=combo$studyId,
+    nStudies=max(combo$studyId)
+  ),
+  control=list(adapt_delta=.99),
+  chains=32,iter=5000,thin=5
+)
 
 if(FALSE){
   nSpecies<-20
