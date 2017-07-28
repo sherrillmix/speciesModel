@@ -1,5 +1,5 @@
 library(dnar)
-nCut<-1000
+nCut<-200
 nReads<-1:10
 
 
