@@ -3,8 +3,8 @@ rare<-read.csv('work/rareN.csv',row.names=1)
 rare2<-read.csv('work/rareN2.csv',row.names=1)
 info<-read.csv('data/islandGut discovery metadata - map.tsv.csv',row.names=1,stringsAsFactors=FALSE)
 info2<-read.csv('data/islandGut validation metadata - map.tsv.csv',row.names=1,stringsAsFactors=FALSE)
-info$otu<-rare[rownames(info),'X2']
-info2$otu<-rare2[rownames(info2),'X2']
+info$otu<-rare[rownames(info),'X1']
+info2$otu<-rare2[rownames(info2),'X1']
 info$study<-'bushman'
 info$weight<-info$Weight_to_use
 info$nRead<-info$filteredReadCount
