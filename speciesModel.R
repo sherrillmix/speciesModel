@@ -174,58 +174,61 @@ dev.off()
 
 
 stanCode<-'
-data{
-  int<lower=0> n;
-  real otus[n]; //log
-  int<lower=1> ids[n];
-  int<lower=0> nIds;
-  vector[nIds] weights; //log
-  int<lower=1> classes[nIds];
-  int<lower=0> nClasses;
-  int<lower=1> studies[n];
-  int<lower=0> nStudies;
-}
-parameters {
-  vector[nClasses] intercepts;
-  //real<lower=0> metaSigma;
-  vector<lower=0>[nClasses] classSigmas;
-  vector<lower=0>[nStudies] sigmas;
-  //real<lower=0> sigma;
-  vector[nIds] rawMus;
-  //vector[nClasses] rawBetas;
-  real metaBeta;
-  //real<lower=0> metaBetaSd;
-  vector[nStudies] rawStudyBetas;
-  real<lower=0> metaStudyBetaSd;
-  //real<lower=0> speciesVar;
-}
-transformed parameters {
-  vector[n] mus;
-  //vector[nClasses] betas;
-  vector[nStudies] studyBetas;
-  vector[nIds] speciesMus;
-  //betas=metaBeta+metaBetaSd*rawBetas;
-  studyBetas=metaStudyBetaSd*rawStudyBetas;
-  //mus=intercepts[classes[ids]] + betas[classes[ids]] .* weights + rawMus[ids]*metaSigma;
-  speciesMus=rawMus .* classSigmas[classes];
-  //mus = intercepts[classes[ids]] + studyBetas[studies]+betas[classes[ids]] .* weights[ids] + speciesMus[ids];
-  mus = intercepts[classes[ids]] + studyBetas[studies]+metaBeta * weights[ids] + speciesMus[ids];
-}
-model {
-  //speciesVar ~ gamma(1,3);
-  //sigmas ~ gamma(1,speciesVar);
-  classSigmas ~ gamma(1,.1);
-  sigmas ~ gamma(1,.1);
-  metaStudyBetaSd ~ gamma(1,.1);
-  rawStudyBetas ~ normal(0,1);
-  //sigma ~ gamma(1,.1);
-  //rawBetas ~ normal(0,1);
-  //metaBetaSd ~ gamma(1,.1);
-  //metaSigma ~ gamma(1,3);
-  rawMus ~ normal(0,1);
-  //otus ~ normal(mus[ids],sigmas[classes[ids]]);
-  otus ~ normal(mus,sigmas[studies]);
-}
+  data{
+    int<lower=0> n;
+    real otus[n]; //log
+    int<lower=1> ids[n];
+    int<lower=0> nIds;
+    vector[nIds] weights; //log
+    int<lower=1> classes[nIds];
+    int<lower=0> nClasses;
+    int<lower=1> studies[n];
+    int<lower=0> nStudies;
+  }
+  parameters {
+    real interceptMu;
+    real<lower=0> interceptSd;
+    vector[nStudies-1] rawIntercepts;
+    //real<lower=0> metaSigma;
+    vector<lower=0>[nClasses] classSigmas;
+    vector<lower=0>[nStudies] sigmas;
+    //real<lower=0> sigma;
+    vector[nIds] rawMus;
+    //vector[nClasses] rawBetas;
+    //real metaBeta;
+    //real<lower=0> metaBetaSd;
+    //vector[nStudies] rawStudyBetas;
+    //real<lower=0> metaStudyBetaSd;
+    //real<lower=0> speciesVar;
+    real beta;
+  }
+  transformed parameters {
+    vector[n] mus;
+    vector[nIds] speciesMus;
+    vector[nStudies] intercepts;
+    //betas=metaBeta+metaBetaSd*rawBetas;
+    //mus=intercepts[classes[ids]] + betas[classes[ids]] .* weights + rawMus[ids]*metaSigma;
+    speciesMus=rawMus .* classSigmas[classes];
+    //mus = intercepts[classes[ids]] + studyBetas[studies]+betas[classes[ids]] .* weights[ids] + speciesMus[ids];
+    intercepts=interceptMu + append_row(0.0,rawIntercepts)*interceptSd;
+    mus = intercepts[studies] + beta* weights[ids] + speciesMus[ids];
+  }
+  model {
+    //speciesVar ~ gamma(1,3);
+    //sigmas ~ gamma(1,speciesVar);
+    classSigmas ~ gamma(1,.1);
+    sigmas ~ gamma(1,.1);
+    //metaStudyBetaSd ~ gamma(1,.1);
+    //rawStudyBetas ~ normal(0,1);
+    rawIntercepts ~ normal(0,1);
+    //sigma ~ gamma(1,.1);
+    //rawBetas ~ normal(0,1);
+    //metaBetaSd ~ gamma(1,.1);
+    //metaSigma ~ gamma(1,3);
+    rawMus ~ normal(0,1);
+    //otus ~ normal(mus[ids],sigmas[classes[ids]]);
+    otus ~ normal(mus,sigmas[studies]);
+  }
 '
 
 commonCols<-c('common','class','log.otus','log.weight','study','taxa')
@@ -308,40 +311,105 @@ pdf('data3.pdf',width=12,height=12)
   plotFit2(fit3,dat3)
 dev.off()
 
-if(!file.exists('work/rareN.csv'))source('readData.R')
-rare<-read.csv('work/rareN.csv',row.names=1)
-rare2<-read.csv('work/rareN2.csv',row.names=1)
-info<-read.csv('data/islandGut discovery metadata - map.tsv.csv',row.names=1,stringsAsFactors=FALSE)
-info2<-read.csv('data/islandGut validation metadata - map.tsv.csv',row.names=1,stringsAsFactors=FALSE)
-info$otu<-rare[rownames(info),'X2']
-info2$otu<-rare2[rownames(info2),'X2']
-info$study<-'bushman'
-info$weight<-info$Weight_to_use
-info$nRead<-info$filteredReadCount
-info2$nRead<-info2$readCount
-sharedCols<-intersect(colnames(info),colnames(info2))
-combo<-rbind(info[,sharedCols],info2[info2$study!='bushman',sharedCols])
-combo<-combo[combo$nRead>1000&!is.na(combo$weight),]
-combo$speciesId<-as.numeric(as.factor(paste(combo$genus,combo$species)))
-combo$classId<-as.numeric(as.factor(combo$class))
-combo$studyId<-as.numeric(as.factor(combo$study))
+source('readCombo.R')
 
+stanCode<-'
+  functions{
+    int[] p_greater(vector x, real y,int n){
+      int out[n];
+      for(ii in 1:n){
+        if(x[ii]>y)out[ii]=1;
+        else out[ii]=2;
+      }
+      return(out);
+    }
+  }
+  data{
+    int<lower=0> n;
+    real otus[n]; //log
+    int<lower=1> ids[n]; //assumes id is sorted by weigh
+    int<lower=0> nIds;
+    vector[nIds] weights; //log
+    int<lower=1> classes[nIds];
+    int<lower=0> nClasses;
+    int<lower=1> studies[n];
+    int<lower=0> nStudies;
+  }
+  parameters {
+    real interceptMu;
+    real<lower=0> interceptSd;
+    vector[nStudies-1] rawIntercepts;
+    vector<lower=0>[nClasses] classSigmas;
+    vector<lower=0>[nStudies] sigmas;
+    vector[nIds] rawMus;
+    //vector[2] betas;
+    //real<lower=min(weights)*1.01,upper=max(weights)*.99> cutoff; //keep cutoff within dataset
+    real beta;
+  }
+  transformed parameters {
+    vector[n] mus;
+    vector[nIds] speciesMus;
+    vector[nStudies] intercepts;
+    vector[2] betaAdds; //make intercept plus addition
+    //betaAdds[1]=betas[1];
+    //betaAdds[2]=betas[1]+betas[2];
+    speciesMus=rawMus .* classSigmas[classes];
+    intercepts=interceptMu + append_row(0.0,rawIntercepts)*interceptSd;
+    //mus = intercepts[studies] + betaAdds[p_greater(weights[ids],cutoff,n)].* weights[ids] + speciesMus[ids];
+    mus = intercepts[studies] + beta* weights[ids] + speciesMus[ids];
+  }
+  model {
+    classSigmas ~ gamma(1,.1);
+    sigmas ~ gamma(1,.1);
+    rawIntercepts ~ normal(0,1);
+    rawMus ~ normal(0,1);
+    otus ~ normal(mus,sigmas[studies]);
+  }
+'
 fit4<-stan(
   model_code=stanCode,
   data=list(
-    otus=log10(combo$otu),
+    otus=combo$log.otus,
     n=nrow(combo),
     ids=combo$speciesId,
     nIds=max(combo$speciesId),
-    weights=tapply(log10(combo$weight),combo$speciesId,mean),
+    weights=tapply(combo$log.weight,combo$speciesId,mean),
     classes=tapply(combo$classId,combo$speciesId,'[[',1),
     nClasses=max(combo$classId),
     studies=combo$studyId,
     nStudies=max(combo$studyId)
   ),
-  control=list(adapt_delta=.99),
-  chains=32,iter=5000,thin=5
+  #,max_treedepth=15,adapt_delta=.999
+  control=list(),
+  #chains=32,iter=100000,thin=25
+  chains=32,iter=200000,thin=40
 )
+pdf('test.pdf')
+#print(traceplot(fit4,c('betas','cutoff','sigmas')))
+print(traceplot(fit4,c('betas','sigmas')))
+dev.off()
+
+
+plotFit3<-function(fit,dat){
+  sims<-extract(fit)
+  #speciesMeans<-apply(sims[['speciesMus']],2,mean)
+  studyMeans<-apply(sims[['intercepts']],2,mean)
+  weights<-tapply(dat$log.weight,dat$speciesId,mean)
+  speciesCols<-rainbow(max(dat$speciesId),alpha=.7)
+  studyCols<-rainbow(max(dat$studyId),alpha=.7)
+  xlim<-range(dat$log.weight)
+  ylim<-range(dat$log.otus)
+  dat$adjusted<-dat$log.otus-studyMeans[dat$studyId]
+  #plotting
+  plot(dat$log.weight,dat$log.otus,pch=21,bg=speciesCols[dat$speciesId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim)
+  ylim<-range(dat$adjusted)
+  plot(dat$log.weight,dat$adjusted,pch=21,bg=studyCols[dat$studyId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim,main='Adjusted')
+  browser()
+}
+pdf('data4.pdf',width=12,height=12)
+  plotFit3(fit4,combo)
+dev.off()
+
 
 if(FALSE){
   nSpecies<-20
