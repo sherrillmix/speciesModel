@@ -2,7 +2,6 @@ library(rstan)
 library(vipor)
 library(dnar)
 library(vioplot)
-
 #use multiple cores (careful with big models on small computers)
 options(mc.cores = parallel::detectCores())
 #cache compilations (doesn't actually work that well, at least with model_code=)
@@ -312,7 +311,6 @@ pdf('data3.pdf',width=12,height=12)
 dev.off()
 
 source('readCombo.R')
-
 stanCode<-'
   functions{
     int[] p_greater(vector x, real y,int n){
@@ -345,15 +343,17 @@ stanCode<-'
     //vector[2] betas;
     //real<lower=min(weights)*1.01,upper=max(weights)*.99> cutoff; //keep cutoff within dataset
     real beta;
+    //vector[nClasses] classMus;
   }
   transformed parameters {
     vector[n] mus;
     vector[nIds] speciesMus;
     vector[nStudies] intercepts;
-    vector[2] betaAdds; //make intercept plus addition
+    //vector[2] betaAdds; //make intercept plus addition
     //betaAdds[1]=betas[1];
     //betaAdds[2]=betas[1]+betas[2];
-    speciesMus=rawMus .* classSigmas[classes];
+    //speciesMus=classMus[classes]  + rawMus .* classSigmas[classes];
+    speciesMus= rawMus .* classSigmas[classes];
     intercepts=interceptMu + append_row(0.0,rawIntercepts)*interceptSd;
     //mus = intercepts[studies] + betaAdds[p_greater(weights[ids],cutoff,n)].* weights[ids] + speciesMus[ids];
     mus = intercepts[studies] + beta* weights[ids] + speciesMus[ids];
@@ -380,13 +380,13 @@ fit4<-stan(
     nStudies=max(combo$studyId)
   ),
   #,max_treedepth=15,adapt_delta=.999
-  control=list(),
+  control=list(max_treedepth=11,adapt_delta=.99),
   #chains=32,iter=100000,thin=25
-  chains=32,iter=200000,thin=40
+  chains=32,iter=100000,thin=40
 )
 pdf('test.pdf')
 #print(traceplot(fit4,c('betas','cutoff','sigmas')))
-print(traceplot(fit4,c('betas','sigmas')))
+print(traceplot(fit4,c('beta','sigmas')))
 dev.off()
 
 
@@ -394,19 +394,41 @@ plotFit3<-function(fit,dat){
   sims<-extract(fit)
   #speciesMeans<-apply(sims[['speciesMus']],2,mean)
   studyMeans<-apply(sims[['intercepts']],2,mean)
+  beta<-mean(sims[['beta']])
+  interceptMu<-mean(sims[['interceptMu']])
   weights<-tapply(dat$log.weight,dat$speciesId,mean)
-  speciesCols<-rainbow(max(dat$speciesId),alpha=.7)
-  studyCols<-rainbow(max(dat$studyId),alpha=.7)
+  speciesCols<-rainbow(max(dat$speciesId),alpha=.8)
+  studyCols<-rainbow.lab(max(dat$studyId),alpha=.8)
+  names(studyCols)<-sapply(1:length(studyCols),function(xx)dat[dat$studyId==xx,'study'][1])
   xlim<-range(dat$log.weight)
   ylim<-range(dat$log.otus)
-  dat$adjusted<-dat$log.otus-studyMeans[dat$studyId]
+  dat$adjusted<-dat$log.otus-studyMeans[dat$studyId]+interceptMu
   #plotting
-  plot(dat$log.weight,dat$log.otus,pch=21,bg=speciesCols[dat$speciesId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim)
-  ylim<-range(dat$adjusted)
-  plot(dat$log.weight,dat$adjusted,pch=21,bg=studyCols[dat$studyId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Log weight',ylab='Log rarefied species',xlim=xlim,ylim=ylim,main='Adjusted')
-  browser()
+  #plot(dat$log.weight,dat$log.otus,pch=21,bg=studyCols[dat$studyId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Average weight of species',ylab='Number of rarefied OTUs',xlim=xlim,ylim=ylim,xaxt='n',yaxt='n')
+  plot(dat$log.weight,dat$log.otus,pch=21,bg=studyCols[dat$studyId],col=NA,lwd=2,las=1,xlab='Average weight of species',ylab='Number of rarefied OTUs',xlim=xlim,ylim=ylim,xaxt='n',yaxt='n',main='Raw',mgp=c(2.4,.8,0),cex=.7)
+  prettyY<-c(1,2,5,10,20,50,100)
+  axis(2,log10(prettyY),prettyY,las=1)
+  yTick<-c(1:10,(2:10)*10,(2:10)*100)
+  axis(2,log10(yTick),rep('',length(yTick)),tcl=-.25)
+  prettyX<-10^seq(-4,8,2)
+  axis(1,log10(prettyX),sapply(log10(prettyX),function(xx)as.expression(bquote(10^.(xx)))),las=1)
+  #adjusted
+  #ylim<-range(dat$adjusted)
+  #plot(dat$log.weight,dat$adjusted,pch=21,bg=studyCols[dat$studyId],col=rainbow(max(dat$classId))[dat$classId],lwd=2,las=1,xlab='Average weight of species',ylab='Number of rarefied OTUs',xlim=xlim,ylim=ylim,main='Adjusted',xaxt='n',yaxt='n',mgp=c(2.5,.8,0))
+  plot(dat$log.weight,dat$adjusted,pch=21,bg=studyCols[dat$studyId],col=NA,lwd=2,las=1,xlab='Average weight of species',ylab='Number of rarefied OTUs',xlim=xlim,ylim=ylim,main='Adjusted',xaxt='n',yaxt='n',mgp=c(2.4,.8,0),cex=.7)
+  axis(2,log10(prettyY),prettyY,las=1)
+  axis(2,log10(yTick),rep('',length(yTick)),tcl=-.25)
+  axis(1,log10(prettyX),sapply(log10(prettyX),function(xx)as.expression(bquote(10^.(xx)))),las=1)
+  fakeX<-seq(min(dat$log.weight),max(dat$log.weight),length.out=100)
+  predX<-interceptMu+beta*fakeX
+  multiPred<-do.call(rbind,mapply(function(a,b)a+fakeX*b,sims[['interceptMu']],sims[['beta']],SIMPLIFY=FALSE))
+  cis<-apply(multiPred,2,quantile,c(.025,.975))
+  lines(fakeX,predX)
+  polygon(c(fakeX,rev(fakeX)),c(cis[1,],rev(cis[2,])),col='#00000022',border=NA)
+  legend('bottomleft',names(studyCols),pt.bg=studyCols,pch=21,inset=c(-.8,-.46),ncol=3,xpd=NA,col=NA)
 }
-pdf('data4.pdf',width=12,height=12)
+pdf('out/bayesSpeciesArea.pdf',width=8,height=6)
+  par(mfrow=c(1,2),mar=c(9.5,4,1,.3))
   plotFit3(fit4,combo)
 dev.off()
 
