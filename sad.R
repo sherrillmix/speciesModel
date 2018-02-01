@@ -21,6 +21,10 @@ n2<-sapply(speciesAbund2,sum)
 isEnough2<-n2>nReads
 
 
+
+
+
+
 rads<-mclapply(speciesAbund,radfit,mc.cores=20)
 rads2<-mclapply(speciesAbund2,radfit,mc.cores=20)
 rads[isEnough][1]
@@ -53,7 +57,8 @@ powCoef2<-sapply(pows2,function(xx)xx@coef)
 names(powCoef2)<-sub('.s$','',names(powCoef2))
 powCoef2<-powCoef2[info2[names(pows2),'study']!='bushman'&names(pows2) %in% rownames(info2)]
 
-fitters<-c('Broken stick'=fitbs2,'Log series'=fitls2,'Neutral (MZSM)'=fitmzsm2,'Power'=fitpower,'Power bend'=fitpowbend2,'Poisson lognormal'=fitpoilog,'Negative binom'=fitnbinom2,'Geometric'=fitgeom2,'Log normal'=fitlnorm,'Gamma'=fitgamma2,'Weibull'=fitweibull)
+fitters<-c('Broken stick'=fitbs2,'Geometric'=fitgeom2,'Log series'=fitls2,'Neutral (MZSM)'=fitmzsm2,'Power'=fitpower,'Power bend'=fitpowbend2,'Log normal'=fitlnorm,'Poisson lognormal'=fitpoilog2,'Gamma'=fitgamma2,'Weibull'=fitweibull) #,'Negative binom'=fitnbinom2
+load('work/deblurAbund.Rdat')
 #fitters<-c('Zipf'=fitzipf,'Zipf-Mandelbrot'=fitmand,'Rank broken stick'=fitrbs,'Geometric'=fitgs) #,fitvolkov
 fits<-mclapply(speciesAbund[isEnough],function(xx){
   cat('.')
@@ -74,16 +79,18 @@ fits<-mclapply(speciesAbund[isEnough],function(xx){
 bics<-do.call(rbind,lapply(fits,function(xx){
   sapply(xx,function(yy){
     if(is.null(yy))return(NA)
-    else return(BIC(yy))
+    else return(AIC(yy))
   })
 }))
 bicDiff<-t(apply(bics,1,function(xx)xx-min(xx,na.rm=TRUE)))
 bicDiff[is.infinite(bicDiff)]<-NA
-bicDiff<-bicDiff[do.call(order,info[rownames(bics),c('phylum','supersuperclass','superclass','class','superorder','clade','order','family','genus','species')]),]
+bicDiff<-bicDiff[do.call(order,cbind(info[rownames(bics),c('phylum','supersuperclass','superclass','class','superorder','clade','order','family','genus','species')])),]
 #bicDiff[is.na(bicDiff)]<-max(bicDiff+1,na.rm=TRUE)
 colnames(bicDiff)<-names(fitters)
 bicCondense<-do.call(rbind,by(bicDiff,info[rownames(bicDiff),'common'],function(xx)apply(xx,2,mean,na.rm=TRUE)))
 bicCondense<-bicCondense[orderIn(rownames(bicCondense),info[rownames(bicDiff),'common']),]
+rownames(bicCondense)<-sub('TigerSha','Tiger sha',sub('SSBShark','Sandbar shark',sub('SBUShark','Bull shark',sub('Vietnames ','Vietnamese ',rownames(bicCondense)))))
+bicCondense<-bicCondense[rownames(bicCondense)!='unknown_or_none',]
 pdf('out/picks.pdf',height=10)
   par(mar=c(7,10,1,1))
   image(1:ncol(bicCondense),1:nrow(bicCondense),t(log2(1+bicCondense)),xaxt='n',col=colorRampPalette(c('red','blue'))(100),ylab='',xlab='',yaxt='n')
@@ -92,10 +99,12 @@ pdf('out/picks.pdf',height=10)
 dev.off()
 
 #color brewer
-fitCols<-c('#8dd3c7CC','#ffffb3CC','#bebadaCC','#fb8072CC','#80b1d3CC','#fdb462CC','#b3de69CC','#fccde5CC','#bc80bdCC')
-names(fitCols)<-c('Broken stick','Log norm','Log series','Neutral (MZSM)','Neutral (Volkov)','Power series','Power bend','Gamma','Neg binom')
-targets<-c('Stinkbug','Human','Goat','Right Whale')
-ids<-sapply(targets,function(xx)which(info[rownames(bicDiff),'common']==xx)[1])
+#fitCols<-c('#8dd3c7CC','#ffffb3CC','#bebadaCC','#fb8072CC','#80b1d3CC','#fdb462CC','#b3de69CC','#fccde5CC','#bc80bdCC')
+fitCols<-c('#a6cee3AA','#1f78b4AA','#b2df8aAA','#33a02cAA','#fb9a99AA','#e31a1cAA','#fdbf6fAA','#ff7f00AA','#cab2d6AA','#6a3d9aAA','#ffff99AA')[1:ncol(bicDiff)]
+names(fitCols)<-colnames(bicDiff)
+#c('Broken stick','Log norm','Log series','Neutral (MZSM)','Neutral (Volkov)','Power series','Power bend','Gamma','Neg binom')
+targets<-c('Stinkbug'='Stinkbug','Human'='Human','TigerShark'='Tiger shark','Right Whale'='Right Whale')
+ids<-sapply(names(targets),function(xx)which(info[rownames(bicDiff),'common']==xx)[1])
 names(ids)<-targets
 pdf('out/fits.pdf')
 for(target in targets){
@@ -111,29 +120,58 @@ for(target in targets){
 }
 dev.off()
 
-preds<-mclapply(targets,function(target){
+preds<-mclapply(targets,function(target,...){
   ii<-ids[target]
-  lapply(fits[[ii]],radpred)
+  message(target)
+  out<-mclapply(names(fits[[ii]]),function(jj){
+    message(jj)
+    lazyRadPred(fits[[ii]][[jj]])
+  },mc.cores=10)
+  names(out)<-names(fits[[ii]])
+  return(out)
 },mc.cores=5)
 names(preds)<-targets
 
-pdf('out/fitPicks.pdf')
+pdf('out/fitPicks.pdf',width=8,height=10)
   layout(matrix(c(rep(5,4),1:4),ncol=2),width=c(.7,.3))
-  for(target in targets){
+  par(mar=c(3,3.5,1,1))
+  targetTops<-targetBottoms<-targetLefts<-c()
+  legendAdded<-FALSE
+  for(target in targets[orderIn(targets,rownames(bicCondense),decreasing=TRUE)]){
     ii<-ids[target]
+    print(names(speciesAbund[isEnough])[[ii]])
     thisRad<-rad(speciesAbund[isEnough][[ii]])
-    plot(thisRad$rank,thisRad$abund,main=target,las=1,log='y',xlab='OTU rank',ylab='OTU abundance')
-    isNA<-sapply(1:length(fits[[ii]]),function(xx){
+    plot(thisRad$rank,thisRad$abund,main=target,las=1,log='y',xlab='',ylab='OTU abundance',mgp=c(2.5,.7,0))
+    title(xlab='OTU rank',mgp=c(1.6,1,0))
+    isNA<-sapply(names(fitCols),function(xx){
       if(is.null(fits[[ii]][[xx]]))return(TRUE)
-      lines(preds[[target]][[xx]],col=fitCols[xx],lwd=2)
+      thisPred<-preds[[target]][[xx]]
+      thisPred[is.infinite(thisPred[,'abund']),'abund']<-sum(thisRad)*2
+      lines(thisPred,col=fitCols[xx],lwd=2)
       return(FALSE)
     })
-    legend('topright',names(fitCols)[!isNA],col=fitCols[!isNA],lwd=2)
+    targetLefts[target]<-grconvertX(par('usr')[1],to='ndc')
+    targetTops[target]<-grconvertY(10^par('usr')[4],to='ndc')
+    targetBottoms[target]<-grconvertY(10^par('usr')[3],to='ndc')
+    if(!legendAdded)legend('topright',names(fitCols)[!isNA],col=fitCols[!isNA],lwd=2,bty='n',cex=.95)
+    legendAdded<-TRUE
   }
-  par(mar=c(7,10,1,1))
-  image(1:ncol(bicCondense),1:nrow(bicCondense),t(log2(1+bicCondense)),xaxt='n',col=colorRampPalette(c('red','blue'))(100),ylab='',xlab='',yaxt='n')
+  par(mar=c(7,10,1,1.5))
+  cols<-colorRampPalette(c('red','blue'))(200)
+  breaks<-seq(min(log10(1+bicCondense),na.rm=TRUE),max(log10(1+bicCondense),na.rm=TRUE),length.out=201)
+  image(1:ncol(bicCondense),1:nrow(bicCondense),t(log10(1+bicCondense)),xaxt='n',col=cols,breaks=breaks,ylab='',xlab='',yaxt='n')
+  box()
   axis(2,1:nrow(bicCondense),rownames(bicCondense),las=2,cex.axis=.7)
-  axis(1,1:ncol(bicCondense),colnames(bicCondense),las=2)
+  slantAxis(1,1:ncol(bicCondense),colnames(bicCondense),srt=-30,adj=c(.1,.5))
+  for(target in targets){
+    y1<-which(rownames(bicCondense)==target)+c(.5,-.5)
+    x1<-rep(par('usr')[2],2)
+    x2<-rep(grconvertX(targetLefts[target],'ndc','user'),2)
+    y2<-grconvertY(c(targetTops[target],targetBottoms[target]),'ndc','user')
+    #polygon(c(x1,rev(x2)),c(y1,rev(y2)),border='#00000099',col=NA,xpd=NA,lty=2)
+    polygon(c(x1,rev(x2)),c(y1,rev(y2)),border='#00000011',col='#00000011',xpd=NA)
+  }
+  insetScale(breaks,cols,c(.015,.015,.025,.3),main='Difference from minimum AIC',at=log10(c(0,10^(1:5))+1),labels=c(0,sapply(1:5,function(xx)as.expression(bquote(10^.(xx))))),offset=.01)
 dev.off()
 
 pdf('out/params.pdf')
@@ -148,31 +186,6 @@ vpPlot(info2[names(powCoef2),'class'],powCoef2,las=2,ylab='Zipf s',ylim=ylim,col
 legend('topleft',names(studyCols),col=studyCols,pch=1)
 dev.off()
 
-
-#http://andrewgelman.com/2016/06/11/log-sum-of-exponentials/
-log_sum_exp<-function(u, v) max(u, v) + log(exp(u - max(u, v)) + exp(v - max(u, v)))
-
-pZM<-function(N,q,s){
-  #fs<-1/(1:N+q)^s
-  logFs<- -s*log(1:N+q)
-  H<-Reduce(log_sum_exp,logFs)
-  exp(logFs-H)
-}
-pRadZM<-function(ns,q,s,log=TRUE){
-  if(q<=-1)return(ifelse(log,-Inf,0))
-  N<-sum(ns)
-  rad<-table(factor(ns,levels=1:N))
-  ps<-pZM(N,q,s)
-  out<-dmultinom(rad,sum(rad),ps,log=log)
-  return(out)
-}
-fitZM<-function(ns){
-  fit<-withCallingHandlers(
-    nlm(function(qs,ns)-pRadZM(ns,qs[1],qs[2]),c(0,1),ns),
-    warning=function(w)if(grepl('Inf replaced by maximum positive value',w))invokeRestart('muffleWarning')
-  )
-  return(c('q'=fit$estimate[1],'s'=fit$estimate[2],'log-likelihood'=-fit$minimum))
-}
 
 zms<-do.call(rbind,mclapply(speciesAbund[isEnough],fitZM,mc.cores=20))
 
@@ -195,3 +208,135 @@ for(ii in 1:10){
   points(preds,pch='-',col='red')
 }
 dev.off()
+
+#deblur
+load('work/deblurAbund.Rdat')
+
+nDeblur<-sapply(deblurAbund,sum)
+isEnoughDeblur<-nDeblur>nReads
+nDeblur2<-sapply(deblurAbund2,sum)
+isEnoughDeblur2<-nDeblur2>nReads
+nDeblur4<-sapply(deblurAbund4,sum)
+isEnoughDeblur4<-nDeblur4>nReads
+deblurFits<-mclapply(deblurAbund[isEnoughDeblur],function(xx){
+  cat('.')
+  out<-lapply(fitters,function(func,xx){
+    tryCatch(func(xx),error=function(e)return(NULL))
+  },xx)
+  return(out)
+},mc.cores=30,mc.preschedule=FALSE)
+deblurFits2<-mclapply(deblurAbund2[isEnoughDeblur2],function(xx){
+  cat('.')
+  out<-lapply(fitters,function(func,xx){
+    tryCatch(func(xx),error=function(e)return(NULL))
+  },xx)
+  return(out)
+},mc.cores=30,mc.preschedule=FALSE)
+deblurFits4<-mclapply(deblurAbund4[isEnoughDeblur4],function(xx){
+  cat('.')
+  out<-lapply(fitters,function(func,xx){
+    tryCatch(func(xx),error=function(e)return(NULL))
+  },xx)
+  return(out)
+},mc.cores=30,mc.preschedule=FALSE)
+
+plotBics<-function(fits,speciesAbund,info,outFile){
+  bics<-do.call(rbind,lapply(fits,function(xx){
+    sapply(xx,function(yy){
+      if(is.null(yy))return(NA)
+      else return(AIC(yy))
+    })
+  }))
+  bicDiff<-t(apply(bics,1,function(xx)xx-min(xx,na.rm=TRUE)))
+  bicDiff[is.infinite(bicDiff)]<-NA
+  bicDiff<-bicDiff[do.call(order,cbind(info[rownames(bics),c('phylum','supersuperclass','superclass','class','superorder','clade','order','family','genus','species')])),]
+  colnames(bicDiff)<-names(fitters)
+  #need to reorder to match bicDiff reordering
+  speciesAbund<-speciesAbund[rownames(bicDiff)]
+  fits<-fits[rownames(bicDiff)]
+  bicCondense<-do.call(rbind,by(bicDiff,info[rownames(bicDiff),'common'],function(xx)apply(xx,2,mean,na.rm=TRUE)))
+  bicCondense<-bicCondense[orderIn(rownames(bicCondense),info[rownames(bicDiff),'common']),]
+  rownames(bicCondense)<-sub('TigerSha','Tiger sha',sub('SSBShark','Sandbar shark',sub('SBUShark','Bull shark',sub('Vietnames ','Vietnamese ',rownames(bicCondense)))))
+  bicCondense<-bicCondense[rownames(bicCondense)!='unknown_or_none',]
+  #color brewer
+  fitCols<-c('#a6cee3AA','#1f78b4AA','#b2df8aAA','#33a02cAA','#fb9a99AA','#e31a1cAA','#fdbf6fAA','#ff7f00AA','#cab2d6AA','#6a3d9aAA','#ffff99AA')[1:ncol(bicDiff)]
+  names(fitCols)<-colnames(bicDiff)
+  targets<-c('Stinkbug'='Stinkbug','Human'='Human','TigerShark'='Tiger shark','Right Whale'='Right Whale')
+  ids<-sapply(names(targets),function(xx)which(info[rownames(bicDiff),'common']==xx)[1])
+  names(ids)<-targets
+  preds<-mclapply(targets,function(target,...){
+    ii<-ids[target]
+    message(target)
+    out<-mclapply(names(fits[[ii]]),function(jj){
+      message(jj)
+      #time out after 1 hour
+      tryCatch(R.utils::withTimeout(lazyRadPred(fits[[ii]][[jj]]),timeout=3600),TimeoutException=function(ex){warning('Time out ',jj);NULL})
+    },mc.cores=10)
+    names(out)<-names(fits[[ii]])
+    return(out)
+  },mc.cores=5)
+  names(preds)<-targets
+  pdf(outFile,width=8,height=10)
+    layout(matrix(c(rep(5,4),1:4),ncol=2),width=c(.7,.3))
+    par(mar=c(3,3.5,1,1))
+    targetTops<-targetBottoms<-targetLefts<-c()
+    legendAdded<-FALSE
+    for(target in targets[orderIn(targets,rownames(bicCondense),decreasing=TRUE)]){
+      ii<-ids[target]
+      thisRad<-rad(speciesAbund[[ii]])
+      plot(thisRad$rank,thisRad$abund,main=target,las=1,log='y',xlab='',ylab='OTU abundance',mgp=c(2.5,.7,0),yaxt='n')
+      logAxis(2,las=1)
+      title(xlab='OTU rank',mgp=c(1.6,1,0))
+      isNA<-sapply(names(fitCols),function(xx){
+        if(is.null(fits[[ii]][[xx]]))return(TRUE)
+        if(is.null(preds[[target]][[xx]]))return(TRUE)
+        thisPred<-preds[[target]][[xx]]
+        thisPred[is.infinite(thisPred[,'abund']),'abund']<-sum(thisRad)*2
+        lines(thisPred,col=fitCols[xx],lwd=2)
+        return(FALSE)
+      })
+      targetLefts[target]<-grconvertX(par('usr')[1],to='ndc')
+      targetTops[target]<-grconvertY(10^par('usr')[4],to='ndc')
+      targetBottoms[target]<-grconvertY(10^par('usr')[3],to='ndc')
+      if(!legendAdded)legend('topright',names(fitCols)[!isNA],col=fitCols[!isNA],lwd=2,bty='n',cex=.95)
+      legendAdded<-TRUE
+    }
+    par(mar=c(7,10,1,1.5))
+    cols<-colorRampPalette(c('red','blue'))(200)
+    breaks<-seq(min(log10(1+bicCondense),na.rm=TRUE),max(log10(1+bicCondense),na.rm=TRUE),length.out=201)
+    image(1:ncol(bicCondense),1:nrow(bicCondense),t(log10(1+bicCondense)),xaxt='n',col=cols,breaks=breaks,ylab='',xlab='',yaxt='n')
+    box()
+    axis(2,1:nrow(bicCondense),rownames(bicCondense),las=2,cex.axis=.7)
+    slantAxis(1,1:ncol(bicCondense),colnames(bicCondense),srt=-30,adj=c(.1,.5))
+    for(target in targets){
+      y1<-which(rownames(bicCondense)==target)+c(.5,-.5)
+      x1<-rep(par('usr')[2],2)
+      x2<-rep(grconvertX(targetLefts[target],'ndc','user'),2)
+      y2<-grconvertY(c(targetTops[target],targetBottoms[target]),'ndc','user')
+      #polygon(c(x1,rev(x2)),c(y1,rev(y2)),border='#00000099',col=NA,xpd=NA,lty=2)
+      polygon(c(x1,rev(x2)),c(y1,rev(y2)),border='#00000011',col='#00000011',xpd=NA)
+    }
+    ticks<-1:floor(max(log10(bicCondense),na.rm=TRUE))
+    insetScale(breaks,cols,c(.015,.015,.025,.3),main='Difference from minimum AIC',at=log10(c(0,10^(ticks)+1)),labels=c(0,sapply(ticks,function(xx)as.expression(bquote(10^.(xx))))),offset=.01)
+  dev.off()
+}
+
+plotBics(deblurFits,deblurAbund,info,'out/deblurFit.pdf')
+plotBics(deblurFits2,deblurAbund2,info,'out/deblur2Fit.pdf')
+plotBics(deblurFits4,deblurAbund4,info,'out/deblur4Fit.pdf')
+
+#dada2
+load('work/dadaAbund.Rdat')
+nDada<-sapply(dadaAbund,sum)
+isEnoughDada<-nDada>nReads
+dadaFits<-mclapply(dadaAbund[isEnoughDada],function(xx){
+  cat('.')
+  xx<-xx[xx>1]
+  out<-lapply(fitters,function(func,xx){
+    tryCatch(func(xx,trunc=1),error=function(e)return(NULL))
+  },xx)
+  return(out)
+},mc.cores=30,mc.preschedule=FALSE)
+
+plotBics(dadaFits,lapply(dadaAbund,function(xx)xx[xx>1]),info,'out/dadaFit.pdf')
+
