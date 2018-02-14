@@ -5,6 +5,7 @@ nReads<-1:10
 
 otu<-read.table('data/otu_table.txt.gz',sep='\t',comment='',skip=1,header=TRUE,stringsAsFactors=FALSE,row.names=1)
 info<-read.csv('data/islandGut discovery metadata - map.tsv.csv',row.names=1,stringsAsFactors=FALSE)
+info$weight<-info$Weight_to_use
 taxa<-otu[,ncol(otu)]
 otu<-otu[,-ncol(otu)]
 n<-apply(otu,2,sum)
@@ -48,17 +49,23 @@ save(deblurAbund,deblurAbund2,deblurAbund4,file='work/deblurAbund.Rdat')
 dada<-read.table('data/dada2.otu.tsv.gz',sep='\t',comment='',skip=0,header=TRUE,stringsAsFactors=FALSE)
 dadaAbund<-apply(dada,2,function(xx)sort(xx[xx>0]))
 save(dadaAbund,file='work/dadaAbund.Rdat')
+meta<-read.csv('islandGut discovery metadata - map.tsv.csv',stringsAsFactors=FALSE)
+rownames(meta)<-meta$X.SampleID
+goodIds<-meta$X.SampleID[meta$toKeep=='keep']
 nDada<-apply(dada,2,sum)
-dadaIsEnough<-nDada>1000
+#dadaIsEnough<-nDada>1000
+dadaIsEnough<-names(nDada) %in% goodIds
 dadaRareN<-apply(dada[,dadaIsEnough],2,rareEquation,500,1)
 dadaWeights<-rbind(info[,'weight',drop=FALSE],info2[,'weight',drop=FALSE])[colnames(dada)[dadaIsEnough],'weight']
 dadaSpecies<-sub('unknown_or_none $',' sp.',sub('acheta domestica','acheta domesticus',sub('sus scrofa domesticus','sus scrofa ',apply(rbind(info[,c('genus','species','subspecies')],info2[,c('genus','species','subspecies')])[colnames(dada)[dadaIsEnough],],1,paste,collapse=' '))))
 dadaClass<-rbind(info[,c('class'),drop=FALSE],info2[,c('class'),drop=FALSE])[colnames(dada)[dadaIsEnough],]
 dadaSpecies[grepl('^unknown_or_none',dadaSpecies)]<-NA
+dadaCommon<-meta[colnames(dada)[dadaIsEnough],'common']
 dadaDat<-data.frame(
   'weight'=log10(tapply(dadaWeights,dadaSpecies,mean)),
   'otu'=log10(tapply(dadaRareN,dadaSpecies,mean)),
   'class'=tapply(dadaClass,dadaSpecies,unique),
+  'common'=tapply(dadaCommon,dadaSpecies,unique),
   stringsAsFactors=FALSE
 )
 summary(lm(otu~weight,dadaDat))
@@ -81,11 +88,19 @@ library(scales)
 scientific_10 <- function(x) {
     parse(text=gsub("e", " %*% 10^", scales::scientific_format()(x)))
 }
-pdf('out/dadaSpeciesArea.pdf')
+#classColors<-structure(
+  #c("#FF0000FF", "#FF9900FF", "#CCFF00FF", "#33FF00FF", "#00FF66FF", "#00FFFFFF", "#0066FFFF", "#3300FFFF", "#CC00FFFF", "#FF0099FF"),
+  #.Names = c("Actinopteri", "Aves", "Chondrichthyes", "Diplopoda", "Holothuroidea", "Insecta", "Malacostraca", "Mammalia", "Polychaeta", "Reptilia")
+#)
+classColors<-structure(
+  c('#8dd3c7','#ffed6f','#bc80bd','#fccde5','#80b1d3','#fdb462','#b3de69','#fb8072','#bebada','#ccebc5'),
+  .Names = c("Actinopteri", "Aves", "Chondrichthyes", "Diplopoda", "Holothuroidea", "Insecta", "Malacostraca", "Mammalia", "Polychaeta", "Reptilia")
+)
+pdf('out/dadaSpeciesArea.pdf',width=7,height=7)
 print(
-  ggplot(dadaDat, aes(10^weight, 10^otu, label = rownames(dadaDat))) +
+  ggplot(dadaDat, aes(10^weight, 10^otu, label = sub(' ','\n',common))) +
     geom_smooth(method=lm, color='#00000033')+
-    geom_text_repel(size=1.9) +
+    geom_text_repel(size=2.5,box.padding=.12,point.padding=.3,lineheight=.7,min.segment.length=.1,max.iter=3e4,nudge_y=.02,nudge_x=.1,color='#00000099') +
     #scale_x_continuous(trans='log10',label=scientific_10)+
     ylab('Number of OTUs (rarefied to 500 reads)')+
     xlab('Animal weight (g)')+
@@ -99,7 +114,7 @@ print(
       labels = scales::trans_format("log10", scales::math_format(10^.x))
     ) +
     annotation_logticks(sides = "lb",short = unit(1,"mm"), mid = unit(1,"mm"), long = unit(2,"mm"))+
-    geom_point(color = 'red')
+    geom_point(fill = classColors[dadaDat$class],pch=21,size=4)
 )
 dev.off()
 
