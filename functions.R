@@ -19,7 +19,7 @@ fitpowbend2<-function (x, trunc, start.value, ...) {
 		if (!"lower" %in% names(dots)) 
 			dots$lower = c(s = 0.1, oM = 1)
 		if (!"upper" %in% names(dots)) 
-			dots$upper = c(s = 2.999, oM = 16)
+			dots$upper = c(s = 2.999, oM = 10000)
 	}
 	if (missing(trunc)) {
 		LL <- function(s, oM) -sum(dpowbend(x, s = s, oM = oM, log = TRUE))
@@ -27,13 +27,19 @@ fitpowbend2<-function (x, trunc, start.value, ...) {
 	else {
 		LL <- function(s, oM) -sum(dtrunc2("powbend", x = x, coef = list(s = s, oM = oM), trunc = trunc, log = TRUE))
 	}
-	result <- lapply(c(.01,.1,1,10,100),function(mult)try(do.call("mle2", c(list(LL, start = list(s = shat, oM = oMhat*mult), data = list(x = x)), dots)),silent=TRUE))
+	result <- c(
+    lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(do.call("mle2", c(list(LL, start = list(s = shat, oM = oMhat*mult), data = list(x = x)), dots)),silent=TRUE)),
+	  lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(do.call("mle2", c(list(LL, start = list(s = shat*mult, oM = oMhat), data = list(x = x)), dots)),silent=TRUE)),
+	  lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(do.call("mle2", c(list(LL, start = list(s = shat*mult, oM = oMhat*mult), data = list(x = x)), dots)),silent=TRUE)),
+	  lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(do.call("mle2", c(list(LL, start = list(s = shat/mult, oM = oMhat*mult), data = list(x = x)), dots)),silent=TRUE)),
+	  lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(do.call("mle2", c(list(LL, start = list(s = mult, oM = 1), data = list(x = x)), dots)),silent=TRUE)),
+	  lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(do.call("mle2", c(list(LL, start = list(s = 1, oM = mult), data = list(x = x)), dots)),silent=TRUE)),
+	  lapply(c(1000),function(mult)try(do.call("mle2", c(list(LL, start = list(s = coef(fitpower(xx,trunc=trunc)), oM = mult), data = list(x = x)), dots)),silent=TRUE))
+  )
   result<-result[[which.min(sapply(result,function(xx){if(inherits(xx,'try-error'))return(Inf);return(xx@min)}))]]
   if(inherits(result,'try-error'))stop(result)
 	new("fitsad", result, sad = "powbend", trunc = ifelse(missing(trunc), NaN, trunc))
 }
-
-
 
 
 fitnbinom2<- function (x, trunc = 0, start.value, ...) {
@@ -132,6 +138,44 @@ dbs2<-function(x,N,S,log=FALSE){
     else return(exp(y))
 }
 
+
+fitmzsm2 <-function (x, trunc, start.value, upper = length(x), ...) {
+    dots <- list(...)
+    if (any(x <= 0) | any(!sads:::is.wholenumber(x))) stop("All x must be positive integers")
+    if (sum(x) < 100) warning("\\n small sample size (J<100); \\n mzsm may not be a good approximation")
+    if (!missing(trunc)) {
+        if (min(x) <= trunc) stop("truncation point should be lower than the lowest data value")
+    }
+    if (missing(start.value)) thetahat <- length(x)
+    else thetahat <- start.value
+    if (missing(trunc)) {
+        LL <- function(J, theta) -sum(dmzsm2(x, J = J, theta = theta, log = TRUE))
+    }
+    else {
+        LL <- function(J, theta) -sum(dtrunc2("mzsm", x = x, coef = list(J = J, theta = theta), trunc = trunc, log = TRUE))
+    }
+    result <- do.call("mle2", c(list(LL, start = list(theta = thetahat), 
+        fixed = list(J = sum(x)), data = list(x = x), method = "Brent", 
+        lower = 0.001, upper = upper), dots))
+    if (abs(as.numeric(result@coef) - upper) < 1e-07) warning("mle equal to upper bound provided. \\n Try value for the 'upper' arguent")
+    new("fitsad", result, sad = "mzsm", trunc = ifelse(missing(trunc), NaN, trunc))
+}
+
+dmzsm2<-function (x, J, theta, log = FALSE) {
+    J[!is.finite(J) | J <= 0] <- NaN
+    theta[!is.finite(theta) | theta <= 0] <- NaN
+    mzsm <- function(y, J, theta) log(theta)-log(y) + (theta - 1)*log(1 - y/J)
+    sn <- mzsm(y = x, J = J, theta = theta)
+    mu <- mzsm(y = 1:J, J = J, theta = theta)
+    lpn <- suppressWarnings(sn - log(sum(exp(mu))))
+    if (any(!sads:::is.wholenumber(x))) warning("non integer values in x")
+    lpn[x <= 0 | x > J | !sads:::is.wholenumber(x)] <- -Inf
+    if (any(is.nan(lpn))) warning("NaNs produced")
+    if (log) return(lpn)
+    else return(exp(lpn))
+}
+
+
 fitgamma2<- function (x, trunc, start.value, ...) {
   dots <- list(...)
   if (any(x <= 0)) stop("All x must be positive")
@@ -176,97 +220,19 @@ fitgamma2<- function (x, trunc, start.value, ...) {
   else {
     LL <- function(shape, rate) -sum(dtrunc2("gamma", x = x, coef = list(shape = shape, rate = rate), trunc = trunc, log = TRUE))
   }
-  result <- lapply(c(.01,.1,1,10,100),function(theta)try(suppressWarnings(do.call("mle2", c(list(LL, start = list(shape = ka, rate = 1/theta), data = list(x = x)), dots))),silent=TRUE))
+  result <- c(
+    lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(suppressWarnings(do.call("mle2", c(list(LL, start = list(shape = ka, rate = 1/theta*mult), data = list(x = x)), dots))),silent=TRUE)),
+    lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(suppressWarnings(do.call("mle2", c(list(LL, start = list(shape = ka*mult, rate = 1/theta), data = list(x = x)), dots))),silent=TRUE)),
+    lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(suppressWarnings(do.call("mle2", c(list(LL, start = list(shape = ka*mult, rate = 1/theta*mult), data = list(x = x)), dots))),silent=TRUE)),
+    lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(suppressWarnings(do.call("mle2", c(list(LL, start = list(shape = ka*mult, rate = 1/theta/mult), data = list(x = x)), dots))),silent=TRUE)),
+    lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(suppressWarnings(do.call("mle2", c(list(LL, start = list(shape = 1, rate = mult), data = list(x = x)), dots))),silent=TRUE)),
+    lapply(c(.001,.01,.1,1,10,100,1000),function(mult)try(suppressWarnings(do.call("mle2", c(list(LL, start = list(shape = mult, rate = 1), data = list(x = x)), dots))),silent=TRUE))
+  )
   result<-result[[which.min(sapply(result,function(xx){if(inherits(xx,'try-error'))return(Inf);return(xx@min)}))]]
+  if(inherits(result,'try-error'))stop(result)
   new("fitsad", result, sad = "gamma", trunc = ifelse(missing(trunc), NaN, trunc))
 }
 
-fitmzsm2 <-function (x, trunc, start.value, upper = length(x), ...) {
-    dots <- list(...)
-    if (any(x <= 0) | any(!sads:::is.wholenumber(x))) stop("All x must be positive integers")
-    if (sum(x) < 100) warning("\\n small sample size (J<100); \\n mzsm may not be a good approximation")
-    if (!missing(trunc)) {
-        if (min(x) <= trunc) stop("truncation point should be lower than the lowest data value")
-    }
-    if (missing(start.value)) thetahat <- length(x)
-    else thetahat <- start.value
-    if (missing(trunc)) {
-        LL <- function(J, theta) -sum(dmzsm2(x, J = J, theta = theta, log = TRUE))
-    }
-    else {
-        LL <- function(J, theta) -sum(dtrunc2("mzsm", x = x, coef = list(J = J, theta = theta), trunc = trunc, log = TRUE))
-    }
-    result <- do.call("mle2", c(list(LL, start = list(theta = thetahat), 
-        fixed = list(J = sum(x)), data = list(x = x), method = "Brent", 
-        lower = 0.001, upper = upper), dots))
-    if (abs(as.numeric(result@coef) - upper) < 1e-07) warning("mle equal to upper bound provided. \\n Try value for the 'upper' arguent")
-    new("fitsad", result, sad = "mzsm", trunc = ifelse(missing(trunc), NaN, trunc))
-}
-
-dmzsm2<-function (x, J, theta, log = FALSE) {
-    J[!is.finite(J) | J <= 0] <- NaN
-    theta[!is.finite(theta) | theta <= 0] <- NaN
-    mzsm <- function(y, J, theta) log(theta)-log(y) + (theta - 1)*log(1 - y/J)
-    sn <- mzsm(y = x, J = J, theta = theta)
-    mu <- mzsm(y = 1:J, J = J, theta = theta)
-    lpn <- suppressWarnings(sn - log(sum(exp(mu))))
-    if (any(!sads:::is.wholenumber(x))) warning("non integer values in x")
-    lpn[x <= 0 | x > J | !sads:::is.wholenumber(x)] <- -Inf
-    if (any(is.nan(lpn))) warning("NaNs produced")
-    if (log) return(lpn)
-    else return(exp(lpn))
-}
-
-
-
-fitgamma2<- function (x, trunc, start.value, ...) {
-    dots <- list(...)
-    if (any(x <= 0)) stop("All x must be positive")
-    if (!missing(trunc)) {
-        if (min(x) <= trunc) stop("truncation point should, be lower than the lowest data value")
-    }
-    if (missing(start.value)) {
-        if (missing(trunc)) {
-            ka <- (mean(x)/sd(x))^2
-            theta <- var(x)/mean(x)
-            kahat <- function(k, dados) {
-                eq <- length(dados) * (log(k) - log(mean(dados)) - digamma(k)) + sum(log(dados))
-            }
-            ka <- uniroot(kahat, interval = c(min(theta, ka), max(theta, ka)), dados = x)$root
-            theta <- mean(x)/ka
-        }
-        else {
-					  xh <- hist(x, plot = FALSE)
-            xbr <- xh$breaks
-            Eh <- matrix(ncol = 2, nrow = length(xbr) - 1)
-            for (i in 1:(length(xbr) - 1)) {
-                m1 <- matrix(c(1, 1, -1, 1), ncol = 2)
-                Eh[i, ] <- solve(m1, xbr[i:(i + 1)])
-            }
-            P <- xh$counts/sum(xh$counts)
-            P[P == 0] <- min(P[P > 0])
-            Y <- log(P[-length(P)]) - log(P[-1]) - (log(Eh[-nrow(Eh), 
-                2]) - log(Eh[-1, 2]))
-            X1 <- Eh[-1, 1] - Eh[-nrow(Eh), 1]
-            X2 <- log(Eh[-nrow(Eh), 1]) - log(Eh[-1, 1])
-            st1 <- unname(coef(lm(Y ~ X1 + X2 - 1)))
-            ka <- st1[2] + 1
-            theta <- 1/st1[1]
-        }
-    }
-    else {
-        ka <- start.value[1]
-        theta <- start.value[2]
-    }
-    if (missing(trunc)) {
-        LL <- function(shape, rate) -sum(dgamma(x, shape, rate, log = TRUE))
-    }
-    else {
-        LL <- function(shape, rate) -sum(dtrunc2("gamma", x = x, coef = list(shape = shape, rate = rate), trunc = trunc, log = TRUE))
-    }
-    result <- do.call("mle2", c(list(LL, start = list(shape = ka, rate = 1/theta), data = list(x = x)),lower=1e-12,method='L-BFGS-B', dots))
-    new("fitsad", result, sad = "gamma", trunc = ifelse(missing(trunc), NaN, trunc))
-}
 
 fitgeom2<-function (x, trunc = 0, start.value, ...) {
     dots <- list(...)
@@ -296,7 +262,7 @@ dtrunc2<-function (f, x, trunc, coef, log = FALSE) {
     pf <- get(paste("p", f, sep = ""), mode = "function")
     df <- get(paste("d", f, sep = ""), mode = "function")
     tt <- rep(0, length(x))
-    if (!missing(trunc)) tt[x > trunc] <- do.call(df, c(list(x = x[x > trunc],log=TRUE), coef))-log(1 - do.call(pf, c(list(q = trunc), coef)))
+    if (!missing(trunc)) tt[x > trunc] <- do.call(df, c(list(x = x[x > trunc],log=TRUE), coef))-do.call(pf, c(list(q = trunc,lower.tail=FALSE,log=TRUE), coef))
     else tt <- do.call(df, c(list(x = x), coef,log=TRUE))
     if (log) return(tt)
     return(exp(tt))
