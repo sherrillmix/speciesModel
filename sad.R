@@ -22,9 +22,7 @@ isEnough2<-n2>nReads
 
 
 fitters<-c('Broken stick'=fitbs2,'Geometric'=fitgeom2,'Log series'=fitls2,'Neutral (MZSM)'=fitmzsm2,'Power'=fitpower,'Power bend'=fitpowbend2,'Log normal'=fitlnorm,'Poisson lognormal'=fitpoilog2,'Gamma'=fitgamma2,'Weibull'=fitweibull) #,'Negative binom'=fitnbinom2
-load('work/deblurAbund.Rdat')
-#fitters<-c('Zipf'=fitzipf,'Zipf-Mandelbrot'=fitmand,'Rank broken stick'=fitrbs,'Geometric'=fitgs) #,fitvolkov
-fits<-mclapply(speciesAbund[isEnough],function(xx){
+fits<-mclapply(speciesAbund[goodIds],function(xx){
   cat('.')
   cacheFile<-sprintf('cache/%s.Rdat',digest(xx))
   if(!exists(cacheFile)){
@@ -77,7 +75,7 @@ for(target in targets){
   plot(thisRad$rank,thisRad$abund,main=target,las=1,log='y',xlab='OTU rank',ylab='OTU abundance')
   isNA<-sapply(1:length(fits[[ii]]),function(xx){
     if(is.null(fits[[ii]][[xx]]))return(TRUE)
-    lines(radpred(fits[[ii]][[xx]]),col=fitCols[xx],lwd=2)
+    lines(cacheOperation(sprintf('work/radpred_%s_%s.Rdat',xx,ii),radpred,fits[[ii]][[xx]]),col=fitCols[xx],lwd=2)
     return(FALSE)
   })
   legend('topright',names(fitCols)[!isNA],col=fitCols[!isNA],lwd=2)
@@ -204,7 +202,7 @@ deblurFits4<-mclapply(deblurAbund4[isEnoughDeblur4],function(xx){
   return(out)
 },mc.cores=30,mc.preschedule=FALSE)
 
-plotBics<-function(fits,speciesAbund,info,outFile){
+plotBics<-function(fits,speciesAbund,info,outFile,speciesOrder=NULL){
   bics<-do.call(rbind,lapply(fits,function(xx){
     sapply(xx,function(yy){
       if(is.null(yy))return(NA)
@@ -219,33 +217,35 @@ plotBics<-function(fits,speciesAbund,info,outFile){
   speciesAbund<-speciesAbund[rownames(bicDiff)]
   fits<-fits[rownames(bicDiff)]
   bicCondense<-do.call(rbind,by(bicDiff,info[rownames(bicDiff),'common'],function(xx)apply(xx,2,mean,na.rm=TRUE)))
-  bicCondense<-bicCondense[orderIn(rownames(bicCondense),info[rownames(bicDiff),'common']),]
+  if(is.null(speciesOrder))bicCondense<-bicCondense[orderIn(rownames(bicCondense),info[rownames(bicDiff),'common']),]
+  else bicCondense<-bicCondense[orderIn(rownames(bicCondense),speciesOrder),]
   rownames(bicCondense)<-sub('TigerSha','Tiger sha',sub('SSBShark','Sandbar shark',sub('SBUShark','Bull shark',sub('Vietnames ','Vietnamese ',rownames(bicCondense)))))
   bicCondense<-bicCondense[rownames(bicCondense)!='unknown_or_none',]
   #color brewer
   fitCols<-c('#a6cee3AA','#1f78b4AA','#b2df8aAA','#33a02cAA','#fb9a99AA','#e31a1cAA','#fdbf6fAA','#ff7f00AA','#cab2d6AA','#6a3d9aAA','#ffff99AA')[1:ncol(bicDiff)]
   names(fitCols)<-colnames(bicDiff)
-  targets<-c('Stinkbug'='Stinkbug','Human'='Human','TigerShark'='Tiger shark','Right Whale'='Right Whale')
+  targets<-c('Cricket'='Cricket','Human'='Human','Tiger Shark'='Tiger Shark','Right Whale'='Right Whale')
   ids<-sapply(names(targets),function(xx)which(info[rownames(bicDiff),'common']==xx)[1])
   names(ids)<-targets
-  preds<-mclapply(targets,function(target,...){
+  preds<-cacheOperation(sprintf('work/preds_%s.Rdat',basename(outFile)),mclapply,targets,function(target,...){
     ii<-ids[target]
     message(target)
     out<-mclapply(names(fits[[ii]]),function(jj){
       message(jj)
-      #time out after 1 hour
-      tryCatch(R.utils::withTimeout(lazyRadPred(fits[[ii]][[jj]]),timeout=3600),TimeoutException=function(ex){warning('Time out ',jj);NULL})
+      #time out after .25 hour
+      tryCatch(R.utils::withTimeout(lazyRadPred(fits[[ii]][[jj]]),timeout=3600*.25),TimeoutException=function(ex){warning('Time out ',jj);NULL})
     },mc.cores=10)
     names(out)<-names(fits[[ii]])
     return(out)
   },mc.cores=5)
   names(preds)<-targets
-  pdf(outFile,width=8,height=10)
+  pdf(outFile,width=8,height=10,useDingbats=FALSE)
     layout(matrix(c(rep(5,4),1:4),ncol=2),width=c(.7,.3))
     par(mar=c(3,3.5,1,1))
     targetTops<-targetBottoms<-targetLefts<-c()
-    legendAdded<-FALSE
-    for(target in targets[orderIn(targets,rownames(bicCondense),decreasing=TRUE)]){
+    #legendAdded<-FALSE
+    sortTargets<-targets[orderIn(targets,rownames(bicCondense),decreasing=TRUE)]
+    for(target in sortTargets){
       ii<-ids[target]
       thisRad<-rad(speciesAbund[[ii]])
       plot(thisRad$rank,thisRad$abund,main=target,las=1,log='y',xlab='',ylab='OTU abundance',mgp=c(2.5,.7,0),yaxt='n')
@@ -262,8 +262,8 @@ plotBics<-function(fits,speciesAbund,info,outFile){
       targetLefts[target]<-grconvertX(par('usr')[1],to='ndc')
       targetTops[target]<-grconvertY(10^par('usr')[4],to='ndc')
       targetBottoms[target]<-grconvertY(10^par('usr')[3],to='ndc')
-      if(!legendAdded)legend('topright',names(fitCols)[!isNA],col=fitCols[!isNA],lwd=2,bty='n',cex=.95)
-      legendAdded<-TRUE
+      if(target==tail(sortTargets,1))legend('topright',sub(' ',' ',names(fitCols)),col=fitCols,lwd=2,bty='n',cex=.85,ncol=1,y.intersp=.8)
+      #legendAdded<-TRUE
     }
     par(mar=c(7,10,1,1.5))
     cols<-colorRampPalette(c('red','blue'))(200)
@@ -281,28 +281,32 @@ plotBics<-function(fits,speciesAbund,info,outFile){
       polygon(c(x1,rev(x2)),c(y1,rev(y2)),border='#00000011',col='#00000011',xpd=NA)
     }
     ticks<-1:floor(max(log10(bicCondense),na.rm=TRUE))
-    insetScale(breaks,cols,c(.015,.015,.025,.3),main='Difference from minimum AIC',at=log10(c(0,10^(ticks)+1)),labels=c(0,sapply(ticks,function(xx)as.expression(bquote(10^.(xx))))),offset=.01)
+    insetScale(breaks,cols,c(.015,.015,.025,.3),main='Difference from minimum AIC',at=log10(c(0,10^(ticks)+1)),labels=c(0,sapply(ticks,function(xx)as.expression(bquote(10^.(xx))))))
   dev.off()
 }
 
-plotBics(deblurFits,deblurAbund,info,'out/deblurFit.pdf')
-plotBics(deblurFits2,deblurAbund2,info,'out/deblur2Fit.pdf')
-plotBics(deblurFits4,deblurAbund4,info,'out/deblur4Fit.pdf')
+commonOrder<-c("Encrusted Sand Tubed Worm", "Giant Millipede", "Woodlouse", "Pink Shrimp", "Crab", "Hermit Crab", "Cricket", "Hissing Cockroach", "Praying Mantis", "Boxelder Bug", "Bedbug", "Eastern Yellowjacket", "European Wool Carder Bee", "Two-spotted Bumble Bee", "Long-horned Bee", "Western Honey Bee", "Mealworm", "Rhinoceros Beetle", "Hornworm", "Dagger Moth", "Mosquito", "Drosophila", "Fly", "Striped Sea Cucumber", "Skate", "Tiger Shark", "Lemon Shark", "Sandbar Shark", "Bull Shark", "Sea Robin", "Fluke", "Bearded Dragon", "Eagle Owl", "Cockatiel", "Parakeet", "Horse", "Cat", "Ferret", "Dog", "Alpaca", "Pig", "Cow", "Sheep", "Goat", "Right Whale", "Humpback Whale", "Fin Whale", "Rabbit", "Guinea Pig", "Hamster", "Gerbil", "Mouse", "Rat", "Red Colobus", "Macaque", "Sooty Mangabey", "Mandrill", "Gorilla", "Bonobo", "Western Chimpanzee", "Eastern Chimpanzee", "Nigeria-Cameroon Chimpanzee", "Central Chimpanzee", "Human")
+if(any(!commonOrder %in% meta$common))stop('Problem ordering commons')
 
 #dada2
 load('work/dadaAbund.Rdat')
 nDada<-sapply(dadaAbund,sum)
 isEnoughDada<-nDada>nReads
-dadaFits<-mclapply(dadaAbund[isEnoughDada],function(xx){
+dadaFits<-mclapply(dadaAbund[goodIds],function(xx){
   cat('.')
   xx<-xx[xx>1]
   out<-lapply(fitters,function(func,xx){
     tryCatch(func(xx,trunc=1),error=function(e)return(NULL))
   },xx)
   return(out)
-},mc.cores=30,mc.preschedule=FALSE)
+},mc.cores=50,mc.preschedule=FALSE)
 
-plotBics(dadaFits,lapply(dadaAbund,function(xx)xx[xx>1]),info,'out/dadaFit.pdf')
+plotBics(dadaFits,lapply(dadaAbund,function(xx)xx[xx>1]),meta,'out/dadaFit.pdf',speciesOrder=rev(commonOrder))
+
+plotBics(fits,lapply(speciesAbund,function(xx)xx[xx>1]),meta,'out/otuFit.pdf',speciesOrder=rev(commonOrder))
 
 
 
+plotBics(deblurFits,deblurAbund,info,'out/deblurFit.pdf')
+plotBics(deblurFits2,deblurAbund2,info,'out/deblur2Fit.pdf')
+plotBics(deblurFits4,deblurAbund4,info,'out/deblur4Fit.pdf')
