@@ -21,49 +21,13 @@ n2<-sapply(speciesAbund2,sum)
 isEnough2<-n2>nReads
 
 
-
-
-
-
-rads<-mclapply(speciesAbund,radfit,mc.cores=20)
-rads2<-mclapply(speciesAbund2,radfit,mc.cores=20)
-rads[isEnough][1]
-rads2[isEnough2][1]
-aics<-do.call(rbind,lapply(rads,function(xx)structure(sapply(xx$models,function(yy)yy$aic),.Names=sapply(xx$models,function(yy)yy$model))))
-aics2<-do.call(rbind,lapply(rads2,function(xx)structure(sapply(xx$models,function(yy)yy$aic),.Names=sapply(xx$models,function(yy)yy$model))))
-table(apply(aics[isEnough,],1,which.min),info[rownames(aics[isEnough,]),'class'])
-table(apply(aics2[isEnough2,],1,which.min))
-mandels<-do.call(rbind,lapply(rads,function(xx)xx$model[[5]]$coef))
-mandels2<-do.call(rbind,lapply(rads2,function(xx)xx$model[[5]]$coef))
-zipf<-do.call(rbind,lapply(rads,function(xx)xx$model[[4]]$coef))
-zipf2<-do.call(rbind,lapply(rads2,function(xx)xx$model[[4]]$coef))
-rads[[50]]
-tapply(mandels[isEnough,2],info[rownames(mandels)[isEnough],'class'],mean)
-pbs<-lapply(speciesAbund,fitpowbend)
-
-pows<-mclapply(speciesAbund[isEnough],fitpower,mc.cores=20)
-pows2<-mclapply(speciesAbund2[isEnough2],fitpower,mc.cores=20)
-powbends<-mclapply(speciesAbund[isEnough],fitpowbend,mc.cores=20)
-powbends2<-mclapply(speciesAbund[isEnough2],fitpowbend,mc.cores=20)
-pdf('out/neutralTest.pdf')
-plot(pows[[1]])
-plot(fitpowbend(speciesAbund[isEnough][[1]]))
-plot(fitmzsm(speciesAbund[isEnough][[1]]))
-plot(fitvolkov(speciesAbund[isEnough][[1]]))
-dev.off()
-
-powCoef<-sapply(pows,function(xx)xx@coef)
-powCoef2<-sapply(pows2,function(xx)xx@coef)
-names(powCoef2)<-sub('.s$','',names(powCoef2))
-powCoef2<-powCoef2[info2[names(pows2),'study']!='bushman'&names(pows2) %in% rownames(info2)]
-
 fitters<-c('Broken stick'=fitbs2,'Geometric'=fitgeom2,'Log series'=fitls2,'Neutral (MZSM)'=fitmzsm2,'Power'=fitpower,'Power bend'=fitpowbend2,'Log normal'=fitlnorm,'Poisson lognormal'=fitpoilog2,'Gamma'=fitgamma2,'Weibull'=fitweibull) #,'Negative binom'=fitnbinom2
 load('work/deblurAbund.Rdat')
 #fitters<-c('Zipf'=fitzipf,'Zipf-Mandelbrot'=fitmand,'Rank broken stick'=fitrbs,'Geometric'=fitgs) #,fitvolkov
 fits<-mclapply(speciesAbund[isEnough],function(xx){
   cat('.')
   cacheFile<-sprintf('cache/%s.Rdat',digest(xx))
-  if(TRUE || !exists(cacheFile)){
+  if(!exists(cacheFile)){
     out<-lapply(fitters,function(func,xx){
       tryCatch(func(xx),error=function(e)return(NULL))
     },xx)
@@ -339,4 +303,6 @@ dadaFits<-mclapply(dadaAbund[isEnoughDada],function(xx){
 },mc.cores=30,mc.preschedule=FALSE)
 
 plotBics(dadaFits,lapply(dadaAbund,function(xx)xx[xx>1]),info,'out/dadaFit.pdf')
+
+
 
