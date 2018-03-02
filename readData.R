@@ -96,13 +96,13 @@ classColors<-structure(
   c('#8dd3c7','#ffed6f','#bc80bd','#fccde5','#80b1d3','#fdb462','#b3de69','#fb8072','#bebada','#ccebc5'),
   .Names = c("Actinopteri", "Aves", "Chondrichthyes", "Diplopoda", "Holothuroidea", "Insecta", "Malacostraca", "Mammalia", "Polychaeta", "Reptilia")
 )
-pdf('out/dadaSpeciesArea.pdf',width=7,height=7)
+pdf('out/dadaSpeciesArea.pdf',width=7,height=7,useDingbats=FALSE)
 print(
   ggplot(dadaDat, aes(10^weight, 10^otu, label = sub(' ','\n',common))) +
     geom_smooth(method=lm, color='#00000033')+
     geom_text_repel(size=2.5,box.padding=.12,point.padding=.3,lineheight=.7,min.segment.length=.1,max.iter=3e4,nudge_y=.02,nudge_x=.1,color='#00000099') +
     #scale_x_continuous(trans='log10',label=scientific_10)+
-    ylab('Number of OTUs (rarefied to 500 reads)')+
+    ylab('Number of sequence variants (rarefied to 500 reads)')+
     xlab('Animal weight (g)')+
     theme_classic(base_size = 16)+
     scale_x_log10(
