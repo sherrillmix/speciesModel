@@ -9,7 +9,6 @@ info$weight<-info$Weight_to_use
 taxa<-otu[,ncol(otu)]
 otu<-otu[,-ncol(otu)]
 n<-apply(otu,2,sum)
-#prop<-apply(otu,2,function(xx)xx/sum(xx))
 isEnough<-n>nCut
 rareN<-do.call(cbind,lapply(nReads,function(xx){apply(otu[,isEnough],2,rareEquation,nCut/2,xx)}))
 colnames(rareN)<-nReads
@@ -33,19 +32,6 @@ write.csv(rareN2,'work/rareN2.csv')
 speciesAbund2<-apply(otu2,2,function(xx)sort(xx[xx>0]))
 save(speciesAbund2,file='work/speciesAbund2.Rdat')
 
-pdf('out/rare.pdf')
-plot(1,1,type='n',xlim=c(1,ncol(rareN)),ylim=range(rareN),log='y',xlab='Counts required',ylab='Number of species (2500 reads)',las=1)
-apply(rareN,1,function(xx)lines(1:ncol(rareN),xx,col='#00000044'))
-dev.off()
-
-deblur<-read.table('data/deblur.txt.gz',sep='\t',comment='',skip=1,header=TRUE,stringsAsFactors=FALSE,row.names=1)
-deblurAbund<-apply(deblur[,colnames(deblur)!='Consensus.Lineage'],2,function(xx)sort(xx[xx>0]))
-deblur2<-read.table('data/deblur2.txt.gz',sep='\t',comment='',skip=1,header=TRUE,stringsAsFactors=FALSE,row.names=1)
-deblurAbund2<-apply(deblur2[,colnames(deblur2)!='Consensus.Lineage'],2,function(xx)sort(xx[xx>0]))
-deblur4<-read.table('data/deblur4.txt.gz',sep='\t',comment='',skip=1,header=TRUE,stringsAsFactors=FALSE,row.names=1)
-deblurAbund4<-apply(deblur4[,colnames(deblur4)!='Consensus.Lineage'],2,function(xx)sort(xx[xx>0]))
-save(deblurAbund,deblurAbund2,deblurAbund4,file='work/deblurAbund.Rdat')
-
 dada<-read.table('data/dada2.otu.tsv.gz',sep='\t',comment='',skip=0,header=TRUE,stringsAsFactors=FALSE)
 dadaAbund<-apply(dada,2,function(xx)sort(xx[xx>0]))
 save(dadaAbund,file='work/dadaAbund.Rdat')
@@ -53,7 +39,6 @@ meta<-read.csv('islandGut discovery metadata - map.tsv.csv',stringsAsFactors=FAL
 rownames(meta)<-meta$X.SampleID
 goodIds<-meta$X.SampleID[meta$toKeep=='keep']
 nDada<-apply(dada,2,sum)
-#dadaIsEnough<-nDada>1000
 dadaIsEnough<-names(nDada) %in% goodIds
 dadaRareN<-apply(dada[,dadaIsEnough],2,rareEquation,500,1)
 dadaWeights<-rbind(info[,'weight',drop=FALSE],info2[,'weight',drop=FALSE])[colnames(dada)[dadaIsEnough],'weight']
@@ -70,28 +55,11 @@ dadaDat<-data.frame(
 )
 summary(lm(otu~weight,dadaDat))
 
-pdf('out/dadaSpeciesArea.pdf')
-  plot(10^dadaDat$weight,10^dadaDat$otu,log='xy',xaxt='n',yaxt='n',xlab='Animal weight (g)',ylab='Number of OTUs (rarefied to 500 reads)',cex=.5)
-  logAxis(1)
-  logAxis(2,las=1)
-  text(10^dadaDat$weight,10^dadaDat$otu,rownames(dadaDat),cex=.5)
-  thisLm<-lm(otu~weight,dadaDat)
-  fakeWeights<-seq(min(dadaDat$weight,na.rm=TRUE)-1,max(dadaDat$weight)+1,length.out=1000)
-  preds<-predict(thisLm,data.frame('weight'=fakeWeights),interval='conf')
-  lines(10^fakeWeights,10^preds[,'fit'])
-  polygon(10^c(fakeWeights,rev(fakeWeights)),10^c(preds[,'lwr'],rev(preds[,'upr'])),border=NA,col='#00000022')
-dev.off()
-
-
 library(ggrepel)
 library(scales)
 scientific_10 <- function(x) {
     parse(text=gsub("e", " %*% 10^", scales::scientific_format()(x)))
 }
-#classColors<-structure(
-  #c("#FF0000FF", "#FF9900FF", "#CCFF00FF", "#33FF00FF", "#00FF66FF", "#00FFFFFF", "#0066FFFF", "#3300FFFF", "#CC00FFFF", "#FF0099FF"),
-  #.Names = c("Actinopteri", "Aves", "Chondrichthyes", "Diplopoda", "Holothuroidea", "Insecta", "Malacostraca", "Mammalia", "Polychaeta", "Reptilia")
-#)
 classColors<-structure(
   c('#8dd3c7','#ffed6f','#bc80bd','#fccde5','#80b1d3','#fdb462','#b3de69','#fb8072','#bebada','#ccebc5'),
   .Names = c("Actinopteri", "Aves", "Chondrichthyes", "Diplopoda", "Holothuroidea", "Insecta", "Malacostraca", "Mammalia", "Polychaeta", "Reptilia")
